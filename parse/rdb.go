@@ -3,16 +3,14 @@ package parse
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/generator"
 	"io"
 	"os"
 	"strconv"
 )
-
-type RDBParser struct {
-	handler *bufio.Reader
-}
 
 const (
 	RDB_TYPE_STRING = iota
@@ -32,16 +30,19 @@ const (
 	RDB_TYPE_LIST_QUICKLIST
 	RDB_TYPE_STREAM_LISTPACKS
 
-	// Aux field.
-	RDB_OPCODE_MODULE_AUX    = 247 /* Module auxiliary data. */
 	RDB_OPCODE_IDLE          = 248 /* LRU idle time. */
-	RDB_OPCODE_FREQ          = 249 /* LFU frequency. */
 	RDB_OPCODE_AUX           = 250 /* RDB aux field. */
 	RDB_OPCODE_RESIZEDB      = 251 /* Hash table resize hint. */
 	RDB_OPCODE_EXPIRETIME_MS = 252 /* Expire time in milliseconds. */
 	RDB_OPCODE_EXPIRETIME    = 253 /* Old expire time in seconds. */
 	RDB_OPCODE_SELECTDB      = 254 /* DB number of the following keys. */
 	RDB_OPCODE_EOF           = 255
+
+	RDB_6BIT   = 0
+	RDB_14BIT  = 1
+	RDB_32BIT  = 0x80
+	RDB_64BIT  = 0x81
+	RDB_ENCVAL = 3
 )
 
 const (
@@ -50,13 +51,22 @@ const (
 	RDB_VERSION_MAX = 9
 )
 
+var (
+	buff = make([]byte, 8)
+)
+
+type RDBParser struct {
+	handler *bufio.Reader
+	output  generator.Putter
+}
+
 func RdbNew(file string) Parser {
 	handler, err := os.Open(file)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	return &RDBParser{handler: bufio.NewReader(handler)}
+	return &RDBParser{handler: bufio.NewReader(handler), output: generator.Putter{}}
 }
 
 func (r *RDBParser) Analyze() error {
@@ -65,22 +75,34 @@ func (r *RDBParser) Analyze() error {
 		return err
 	}
 
-	// Begin analyze
-	auxfiled, err := r.handler.ReadByte()
-	switch auxfiled {
-	case RDB_OPCODE_MODULE_AUX:
-		fmt.Println(1)
-	case RDB_OPCODE_IDLE:
-		fmt.Println(2)
-	case RDB_OPCODE_FREQ:
+	var lru_idle, lfu_freq, expire uint64 = -1, -1, -1
+	for {
+		// Begin analyze
+		t, err := r.handler.ReadByte()
+		if t == RDB_OPCODE_IDLE {
+			qword, _, err := r.loadLen()
+			if err != nil {
+				return err
+			}
+			lru_idle = qword
+			continue
+		} else if t == RDB_OPCODE_AUX {
 
-	case RDB_OPCODE_AUX:
-	case RDB_OPCODE_RESIZEDB:
-	case RDB_OPCODE_EXPIRETIME_MS:
-	case RDB_OPCODE_EXPIRETIME:
-	case RDB_OPCODE_SELECTDB:
-	case RDB_OPCODE_EOF:
+		} else if t == RDB_OPCODE_RESIZEDB {
+
+		} else if t == RDB_OPCODE_EXPIRETIME_MS {
+
+		} else if t == RDB_OPCODE_EXPIRETIME {
+
+		} else if t == RDB_OPCODE_SELECTDB {
+
+		} else if t == RDB_OPCODE_EOF {
+
+		} else {
+
+		}
 	}
+
 	if err != nil {
 		return err
 	}
@@ -109,4 +131,44 @@ func (r *RDBParser) skipHeader() error {
 
 func (r *RDBParser) LayoutCheck() bool {
 	return false
+}
+
+func (r *RDBParser) loadLen() (length uint64, isEncode bool, err error) {
+	buf := make([]byte, 2)
+	_, err = r.handler.Read(buf)
+	if err != nil {
+		return
+	}
+	typeLen := (buf[0] & 0xC0) >> 6
+	if typeLen == RDB_ENCVAL || typeLen == RDB_6BIT {
+		if typeLen == RDB_ENCVAL {
+			isEncode = true
+		}
+		length = uint64(buf[0]) & 0x3f
+	} else if typeLen == RDB_14BIT {
+		length = (uint64(buf[0])&0x3f)<<8 | uint64(buf[1])
+	} else if buf[0] == RDB_32BIT {
+		_, err = io.ReadFull(r.handler, buff[0:4])
+		if err != nil {
+			return
+		}
+		length = uint64(binary.BigEndian.Uint32(buff))
+	} else if buf[0] == RDB_64BIT {
+		_, err = io.ReadFull(r.handler, buff)
+		if err != nil {
+			return
+		}
+		length = binary.BigEndian.Uint64(buff)
+	} else {
+		err = errors.New(fmt.Sprintf("unknown length encoding %d in loadLen()", typeLen))
+	}
+
+	return
+}
+
+func (r *RDBParser) loadString() ([]byte, error) {
+	length, needEncode, err := r.loadLen()
+	if err != nil {
+		return nil, err
+	}
 }
