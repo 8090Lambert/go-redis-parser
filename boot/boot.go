@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"github.com/8090Lambert/go-redis-parser/command"
 	"github.com/8090Lambert/go-redis-parser/constants"
-	"github.com/8090Lambert/go-redis-parser/parse"
+	"github.com/8090Lambert/go-redis-parser/protocol"
+	"github.com/8090Lambert/go-redis-parser/rdb"
+	"github.com/fatih/color"
 	"os"
 )
 
@@ -17,15 +19,26 @@ func Boot() {
 		panic(file + " not exist !")
 	}
 
-	factory := parse.NewParserFactory(mod)
+	factory := NewParserFactory(mod)
 	if factory == nil {
 		return
 	}
 
-	parser := factory(file)
-	err := parser.Analyze()
-	if err != nil {
-		fmt.Println("Analyze failed: " + err.Error())
-		return
+	defer func() {
+		if err := recover(); err != nil {
+			if _, ok := err.(string); ok {
+				fmt.Println(color.RedString(fmt.Sprintf("Parse failed: %s", err)))
+			}
+		}
+	}()
+
+	factory(file).Parse()
+}
+
+func NewParserFactory(mod int) protocol.Factory {
+	if mod == constants.RDBMOD {
+		return rdb.NewRDB
+	} else {
+		return nil
 	}
 }
