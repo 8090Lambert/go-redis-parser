@@ -23,6 +23,6 @@ func (a *AOFParser) Analyze() error {
 	return nil
 }
 
-func (a *AOFParser) LayoutCheck() bool {
-	return false
+func (a *AOFParser) LayoutCheck() (bool, error) {
+	return false, nil
 }

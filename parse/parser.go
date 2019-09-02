@@ -6,7 +6,7 @@ import (
 
 type Parser interface {
 	Analyze() error
-	LayoutCheck() bool
+	LayoutCheck() (bool, error)
 }
 
 type Factory func(file string) Parser

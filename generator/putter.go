@@ -23,6 +23,10 @@ func (f *Putter) AuxField(key, value []byte) {
 
 }
 
+func (f *Putter) ResizeDB(dbSize, expireSize uint64) {
+	// For the moment，should ignore.
+}
+
 func (f *Putter) SelectDb(index int) {
 
 }
@@ -35,11 +39,11 @@ func (f *Putter) HSet(key, field, value []byte) {
 
 }
 
-func (f *Putter) SAdd(key, member []byte) {
+func (f *Putter) SAdd(key []byte, expire int, member ...[]byte) {
 
 }
 
-func (f *Putter) List(key []byte, value ...[]byte) {
+func (f *Putter) List(key []byte, expire int, value ...[]byte) {
 
 }
 
