@@ -33,6 +33,7 @@ const (
 	RO_TYPE_STREAM_LISTPACKS
 
 	RDB_OPCODE_IDLE          = 248 /* LRU idle time. */
+	RDB_OPCODE_FREQ          = 249 /* LFU frequency. */
 	RDB_OPCODE_AUX           = 250 /* RDB aux field. */
 	RDB_OPCODE_RESIZEDB      = 251 /* Hash table resize hint. */
 	RDB_OPCODE_EXPIRETIME_MS = 252 /* Expire time in milliseconds. */
@@ -50,6 +51,19 @@ const (
 	RDB_32BIT  = 0x80
 	RDB_64BIT  = 0x81
 	RDB_ENCVAL = 3
+
+	ZIP_STR_06B = 0
+	ZIP_STR_14B = 1
+	ZIP_STR_32B = 2
+
+	ZIP_INT_16B = 0xc0 | 0<<4
+	ZIP_INT_32B = 0xc0 | 1<<4
+	ZIP_INT_64B = 0xc0 | 2<<4
+	ZIP_INT_24B = 0xc0 | 3<<4
+	ZIP_INT_8B  = 0xfe
+	ZIP_INT_4B  = 15
+
+	ZIP_BIG_PREVLEN = 0xfe
 )
 
 const (
@@ -85,7 +99,9 @@ func (r *RDBParser) Analyze() error {
 		return err
 	}
 
-	var lru_idle, lfu_freq, expire uint64 = -1, -1, -1
+	var lru_idle, lfu_freq int64
+	var expire uint64
+	//var expire uint64 = -1
 	var hasSelectDb bool
 	for {
 		// Begin analyze
@@ -98,7 +114,16 @@ func (r *RDBParser) Analyze() error {
 			if err != nil {
 				return err
 			}
-			lru_idle = qword
+			lru_idle = int64(qword)
+			r.output.LRU(lru_idle)
+			continue
+		} else if t == RDB_OPCODE_FREQ {
+			b, err := r.handler.ReadByte()
+			if err != nil {
+				return err
+			}
+			lfu_freq = int64(b)
+			r.output.LFU(lfu_freq)
 			continue
 		} else if t == RDB_OPCODE_AUX {
 			key, err := r.loadString()
@@ -147,8 +172,8 @@ func (r *RDBParser) Analyze() error {
 			r.output.SelectDb(int(dbid))
 			continue
 		} else if t == RDB_OPCODE_EOF {
-			err = nil
-			break
+			continue
+			//return nil
 		} else {
 			key, err := r.loadString()
 			if err != nil {
@@ -159,7 +184,7 @@ func (r *RDBParser) Analyze() error {
 				return err
 			}
 		}
-		expire = -1
+		lfu_freq, lru_idle, expire = -1, -1, 0
 	}
 
 	if err != nil {
@@ -308,17 +333,157 @@ func (r *RDBParser) loadBinaryFloat() (float64, error) {
 	return math.Float64frombits(bits), nil
 }
 
-func (r *RDBParser) loadZipMap() error {
+func (r *RDBParser) loadZipMap(key []byte, expire int) error {
 	zipmap, err := r.loadString()
 	if err != nil {
 		return err
 	}
 	buf := newBuffer(zipmap)
-	length, err := buf.ReadByte()
+	blen, err := buf.ReadByte()
 	if err != nil {
 		return err
 	}
-	if length > 
+
+	length := int(blen)
+	if blen > 254 {
+		length, err = countZipmapItems(buf)
+		if err != nil {
+			return err
+		}
+		length /= 2
+	}
+
+	for i := 0; i < length; i++ {
+		field, err := loadZipmapItem(buf, false)
+		if err != nil {
+			return err
+		}
+		value, err := loadZipmapItem(buf, true)
+		if err != nil {
+			return err
+		}
+		r.output.HSet(key, field, value, expire)
+	}
+	return nil
+}
+
+func (r *RDBParser) loadZipList(key []byte, expire int) error {
+	b, err := r.loadString()
+	if err != nil {
+		return err
+	}
+	buf := newBuffer(b)
+	length, err := loadZiplistLength(buf)
+	if err != nil {
+		return err
+	}
+	ziplistItem := make([][]byte, length)
+	for i := int64(0); i < length; i++ {
+		entry, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		ziplistItem = append(ziplistItem, entry)
+	}
+	r.output.List(key, expire, ziplistItem...)
+	return nil
+}
+
+func (r *RDBParser) loadIntSet(key []byte, expire int) error {
+	b, err := r.loadString()
+	if err != nil {
+		return err
+	}
+	buf := newBuffer(b)
+	sizeBytes, err := buf.Slice(4)
+	if err != nil {
+		return err
+	}
+	intSize := binary.LittleEndian.Uint32(sizeBytes)
+	if intSize != 2 && intSize != 4 && intSize != 8 {
+		return errors.New(fmt.Sprintf("unknown intset encoding: %d", intSize))
+	}
+	lenBytes, err := buf.Slice(4)
+	if err != nil {
+		return err
+	}
+	cardinality := binary.LittleEndian.Uint32(lenBytes)
+	intSetItem := make([][]byte, cardinality)
+
+	for i := uint32(0); i < cardinality; i++ {
+		intBytes, err := buf.Slice(int(intSize))
+		if err != nil {
+			return err
+		}
+		var intString string
+		switch intSize {
+		case 2:
+			intString = strconv.FormatInt(int64(int16(binary.LittleEndian.Uint16(intBytes))), 10)
+		case 4:
+			intString = strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))), 10)
+		case 8:
+			intString = strconv.FormatInt(int64(int64(binary.LittleEndian.Uint64(intBytes))), 10)
+		}
+		intSetItem = append(intSetItem, []byte(intString))
+	}
+	r.output.SAdd(key, expire, intSetItem...)
+	return nil
+}
+
+func (r *RDBParser) loadZiplistZset(key []byte, expire int) error {
+	ziplist, err := r.loadString()
+	if err != nil {
+		return err
+	}
+	buf := newBuffer(ziplist)
+	cardinality, err := loadZiplistLength(buf)
+	if err != nil {
+		return err
+	}
+	cardinality /= 2
+	for i := int64(0); i < cardinality; i++ {
+		member, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		scoreBytes, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		score, err := strconv.ParseFloat(string(scoreBytes), 64)
+		if err != nil {
+			return err
+		}
+		r.output.ZSet(key, member, score)
+	}
+
+	return nil
+}
+
+func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
+	ziplist, err := r.loadString()
+	if err != nil {
+		return err
+	}
+	buf := newBuffer(ziplist)
+	length, err := loadZiplistLength(buf)
+	if err != nil {
+		return err
+	}
+	length /= 2
+	for i := int64(0); i < length; i++ {
+		field, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		value, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		r.output.HSet(key, field, value, expire)
+	}
+	return nil
+
 }
 
 func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
@@ -395,7 +560,7 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 			if err != nil {
 				return err
 			}
-			r.output.HSet(key, field, value)
+			r.output.HSet(key, field, value, convertExpire)
 		}
 	} else if t == RO_TYPE_LIST_QUICKLIST { // quicklist + ziplist to realize linked list
 		length, _, err := r.loadLen()
@@ -412,11 +577,15 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 		}
 		r.output.List(key, convertExpire, ele...)
 	} else if t == RO_TYPE_HASH_ZIPMAP {
-
+		return r.loadZipMap(key, convertExpire)
 	} else if t == RO_TYPE_LIST_ZIPLIST {
+		return r.loadZipList(key, convertExpire)
 	} else if t == RO_TYPE_SET_INTSET {
+		return r.loadIntSet(key, convertExpire)
 	} else if t == RO_TYPE_ZSET_ZIPLIST {
+		return r.loadZiplistZset(key, convertExpire)
 	} else if t == RO_TYPE_HASH_ZIPLIST {
+		return r.loadZiplistHash(key, convertExpire)
 	}
 
 	return nil
@@ -468,4 +637,137 @@ func lzfDecompress(in []byte, inLen, outLen int) []byte {
 	}
 
 	return out
+}
+
+func loadZipmapItem(buf *buffer, readFree bool) ([]byte, error) {
+	length, free, err := loadZipmapItemLength(buf, readFree)
+	if err != nil {
+		return nil, err
+	}
+	if length == -1 {
+		return nil, nil
+	}
+	value, err := buf.Slice(length)
+	if err != nil {
+		return nil, err
+	}
+	_, err = buf.Seek(int64(free), 1)
+	return value, err
+}
+
+func countZipmapItems(buf *buffer) (int, error) {
+	n := 0
+	for {
+		strLen, free, err := loadZipmapItemLength(buf, n%2 != 0)
+		if err != nil {
+			return 0, err
+		}
+		if strLen == -1 {
+			break
+		}
+		_, err = buf.Seek(int64(strLen)+int64(free), 1)
+		if err != nil {
+			return 0, err
+		}
+		n++
+	}
+	_, err := buf.Seek(0, 0)
+	return n, err
+}
+
+func loadZipmapItemLength(buf *buffer, readFree bool) (int, int, error) {
+	b, err := buf.ReadByte()
+	if err != nil {
+		return 0, 0, err
+	}
+	switch b {
+	case 253:
+		s, err := buf.Slice(5)
+		if err != nil {
+			return 0, 0, err
+		}
+		return int(binary.BigEndian.Uint32(s)), int(s[4]), nil
+	case 254:
+		return 0, 0, errors.New("Invalid zipmap item length. ")
+	case 255:
+		return -1, 0, nil
+	}
+	var free byte
+	if readFree {
+		free, err = buf.ReadByte()
+	}
+
+	return int(b), int(free), err
+}
+
+func loadZiplistLength(buf *buffer) (int64, error) {
+	buf.Seek(8, 0)
+	lenBytes, err := buf.Slice(2)
+	if err != nil {
+		return 0, err
+	}
+	return int64(binary.LittleEndian.Uint16(lenBytes)), nil
+}
+
+func loadZiplistEntry(buf *buffer) ([]byte, error) {
+	prevLen, err := buf.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	if prevLen == ZIP_BIG_PREVLEN {
+		buf.Seek(4, 1) // skip the 4-byte prevlen
+	}
+
+	header, err := buf.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case header>>6 == ZIP_STR_06B:
+		return buf.Slice(int(header & 0x3f))
+	case header>>6 == ZIP_STR_14B:
+		b, err := buf.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		return buf.Slice((int(header&0x3f) << 8) | int(b))
+	case header>>6 == ZIP_STR_32B:
+		lenBytes, err := buf.Slice(4)
+		if err != nil {
+			return nil, err
+		}
+		return buf.Slice(int(binary.BigEndian.Uint32(lenBytes)))
+	case header == ZIP_INT_16B:
+		intBytes, err := buf.Slice(2)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(strconv.FormatInt(int64(int16(binary.LittleEndian.Uint16(intBytes))), 10)), nil
+	case header == ZIP_INT_32B:
+		intBytes, err := buf.Slice(4)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))), 10)), nil
+	case header == ZIP_INT_64B:
+		intBytes, err := buf.Slice(8)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(strconv.FormatInt(int64(binary.LittleEndian.Uint64(intBytes)), 10)), nil
+	case header == ZIP_INT_24B:
+		intBytes := make([]byte, 4)
+		_, err := buf.Read(intBytes[1:])
+		if err != nil {
+			return nil, err
+		}
+		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))>>8), 10)), nil
+	case header == ZIP_INT_8B:
+		b, err := buf.ReadByte()
+		return []byte(strconv.FormatInt(int64(int8(b)), 10)), err
+	case header>>4 == ZIP_INT_4B:
+		return []byte(strconv.FormatInt(int64(header&0x0f)-1, 10)), nil
+	}
+
+	return nil, errors.New(fmt.Sprintf("rdb: unknown ziplist header byte: %d", header))
 }
