@@ -41,11 +41,6 @@ const (
 	RDB_OPCODE_SELECTDB      = 254 /* DB number of the following keys. */
 	RDB_OPCODE_EOF           = 255
 
-	RDB_ENCODE_INT8 = iota
-	RDB_ENCODE_INT16
-	RDB_ENCODE_INT32
-	RDB_ENCODE_LZF
-
 	RDB_6BIT   = 0
 	RDB_14BIT  = 1
 	RDB_32BIT  = 0x80
@@ -67,6 +62,11 @@ const (
 )
 
 const (
+	RDB_ENCODE_INT8 = iota
+	RDB_ENCODE_INT16
+	RDB_ENCODE_INT32
+	RDB_ENCODE_LZF
+
 	REDIS           = "REDIS"
 	RDB_VERSION_MIN = 1
 	RDB_VERSION_MAX = 9
@@ -172,8 +172,8 @@ func (r *RDBParser) Analyze() error {
 			r.output.SelectDb(int(dbid))
 			continue
 		} else if t == RDB_OPCODE_EOF {
-			continue
-			//return nil
+			//continue
+			return nil
 		} else {
 			key, err := r.loadString()
 			if err != nil {
@@ -201,10 +201,10 @@ func (r *RDBParser) LayoutCheck() (bool, error) {
 	return true, nil
 }
 
-// 5 bytes "REDIS" and 4 bytes version in rdb.file
+// 9 bytes length include: 5 bytes "REDIS" and 4 bytes version in rdb.file
 func (r *RDBParser) header() error {
 	header := make([]byte, 9)
-	_, err := r.handler.Read(header)
+	_, err := io.ReadFull(r.handler, header)
 	if err != nil {
 		if err == io.EOF {
 			return errors.New("RDB file is empty")
@@ -221,26 +221,31 @@ func (r *RDBParser) header() error {
 }
 
 func (r *RDBParser) loadLen() (length uint64, isEncode bool, err error) {
-	buf := make([]byte, 2)
-	_, err = r.handler.Read(buf)
+	buf, err := r.handler.ReadByte()
 	if err != nil {
 		return
 	}
-	typeLen := (buf[0] & 0xC0) >> 6
+	typeLen := (buf & 0xc0) >> 6
 	if typeLen == RDB_ENCVAL || typeLen == RDB_6BIT {
+		/* Read a 6 bit encoding type or 6 bit len. */
 		if typeLen == RDB_ENCVAL {
 			isEncode = true
 		}
-		length = uint64(buf[0]) & 0x3f
+		length = uint64(buf) & 0x3f
 	} else if typeLen == RDB_14BIT {
-		length = (uint64(buf[0])&0x3f)<<8 | uint64(buf[1])
-	} else if buf[0] == RDB_32BIT {
+		/* Read a 14 bit len, need read next byte. */
+		nb, err := r.handler.ReadByte()
+		if err != nil {
+			return 0, false, err
+		}
+		length = (uint64(buf)&0x3f)<<8 | uint64(nb)
+	} else if buf == RDB_32BIT {
 		_, err = io.ReadFull(r.handler, buff[0:4])
 		if err != nil {
 			return
 		}
 		length = uint64(binary.BigEndian.Uint32(buff))
-	} else if buf[0] == RDB_64BIT {
+	} else if buf == RDB_64BIT {
 		_, err = io.ReadFull(r.handler, buff)
 		if err != nil {
 			return
@@ -255,6 +260,7 @@ func (r *RDBParser) loadLen() (length uint64, isEncode bool, err error) {
 
 func (r *RDBParser) loadString() ([]byte, error) {
 	length, needEncode, err := r.loadLen()
+	//fmt.Println(length, needEncode)
 	if err != nil {
 		return nil, err
 	}
@@ -367,26 +373,27 @@ func (r *RDBParser) loadZipMap(key []byte, expire int) error {
 	return nil
 }
 
-func (r *RDBParser) loadZipList(key []byte, expire int) error {
+func (r *RDBParser) loadZipList(key []byte, expire int) ([][]byte, error) {
 	b, err := r.loadString()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	buf := newBuffer(b)
 	length, err := loadZiplistLength(buf)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ziplistItem := make([][]byte, length)
+
+	ziplistItem := make([][]byte, 0, length)
 	for i := int64(0); i < length; i++ {
 		entry, err := loadZiplistEntry(buf)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ziplistItem = append(ziplistItem, entry)
 	}
-	r.output.List(key, expire, ziplistItem...)
-	return nil
+
+	return ziplistItem, nil
 }
 
 func (r *RDBParser) loadIntSet(key []byte, expire int) error {
@@ -499,15 +506,16 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 		if err != nil {
 			return err
 		}
-		listCollect := make([][]byte, length)
+		//slistCollect := make([][]byte, length)
 		for i := uint64(0); i < length; i++ {
 			val, err := r.loadString()
 			if err != nil {
 				return err
 			}
-			listCollect = append(listCollect, val)
+			//listCollect = append(listCollect, val)
+			r.output.List(key, convertExpire, val)
 		}
-		r.output.List(key, convertExpire, listCollect...)
+
 	} else if t == RO_TYPE_SET {
 		length, _, err := r.loadLen()
 		if err != nil {
@@ -567,19 +575,19 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 		if err != nil {
 			return err
 		}
-		ele := make([][]byte, length)
+
 		for i := uint64(0); i < length; i++ {
-			val, err := r.loadString()
+			listItems, err := r.loadZipList(key, convertExpire)
 			if err != nil {
 				return err
 			}
-			ele = append(ele, val)
+			r.output.List(key, convertExpire, listItems...)
 		}
-		r.output.List(key, convertExpire, ele...)
 	} else if t == RO_TYPE_HASH_ZIPMAP {
 		return r.loadZipMap(key, convertExpire)
 	} else if t == RO_TYPE_LIST_ZIPLIST {
-		return r.loadZipList(key, convertExpire)
+		_, err := r.loadZipList(key, convertExpire)
+		return err
 	} else if t == RO_TYPE_SET_INTSET {
 		return r.loadIntSet(key, convertExpire)
 	} else if t == RO_TYPE_ZSET_ZIPLIST {

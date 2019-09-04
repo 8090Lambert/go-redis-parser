@@ -23,7 +23,6 @@ func Start() {
 
 	flag.Parse()
 	flag.Usage = defaultUsage
-	flag.Usage()
 }
 
 func Watch() (mod int, file string) {
@@ -33,6 +32,7 @@ func Watch() (mod int, file string) {
 	} else if AofFile != "" {
 		return constants.AOFMOD, AofFile
 	} else {
+		flag.Usage()
 		return constants.UNKNOWN, ""
 	}
 }
