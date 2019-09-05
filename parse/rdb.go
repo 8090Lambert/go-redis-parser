@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"unsafe"
 )
 
 const (
@@ -165,15 +166,14 @@ func (r *RDBParser) Analyze() error {
 			if hasSelectDb == true {
 				continue
 			}
-			dbid, _, err := r.loadLen()
+			dbIndex, _, err := r.loadLen()
 			if err != nil {
 				return err
 			}
-			r.output.SelectDb(int(dbid))
+			r.output.SelectDb(int(dbIndex))
 			continue
 		} else if t == RDB_OPCODE_EOF {
-			//continue
-			return nil
+			continue
 		} else {
 			key, err := r.loadString()
 			if err != nil {
@@ -220,279 +220,6 @@ func (r *RDBParser) header() error {
 	return nil
 }
 
-func (r *RDBParser) loadLen() (length uint64, isEncode bool, err error) {
-	buf, err := r.handler.ReadByte()
-	if err != nil {
-		return
-	}
-	typeLen := (buf & 0xc0) >> 6
-	if typeLen == RDB_ENCVAL || typeLen == RDB_6BIT {
-		/* Read a 6 bit encoding type or 6 bit len. */
-		if typeLen == RDB_ENCVAL {
-			isEncode = true
-		}
-		length = uint64(buf) & 0x3f
-	} else if typeLen == RDB_14BIT {
-		/* Read a 14 bit len, need read next byte. */
-		nb, err := r.handler.ReadByte()
-		if err != nil {
-			return 0, false, err
-		}
-		length = (uint64(buf)&0x3f)<<8 | uint64(nb)
-	} else if buf == RDB_32BIT {
-		_, err = io.ReadFull(r.handler, buff[0:4])
-		if err != nil {
-			return
-		}
-		length = uint64(binary.BigEndian.Uint32(buff))
-	} else if buf == RDB_64BIT {
-		_, err = io.ReadFull(r.handler, buff)
-		if err != nil {
-			return
-		}
-		length = binary.BigEndian.Uint64(buff)
-	} else {
-		err = errors.New(fmt.Sprintf("unknown length encoding %d in loadLen()", typeLen))
-	}
-
-	return
-}
-
-func (r *RDBParser) loadString() ([]byte, error) {
-	length, needEncode, err := r.loadLen()
-	//fmt.Println(length, needEncode)
-	if err != nil {
-		return nil, err
-	}
-
-	if needEncode {
-		switch length {
-		case RDB_ENCODE_INT8:
-			b, err := r.handler.ReadByte()
-			return []byte(strconv.Itoa(int(b))), err
-		case RDB_ENCODE_INT16:
-			b, err := r.loadUint16()
-			return []byte(strconv.Itoa(int(b))), err
-		case RDB_ENCODE_INT32:
-			b, err := r.loadUint32()
-			return []byte(strconv.Itoa(int(b))), err
-		case RDB_ENCODE_LZF:
-			res, err := r.loadLZF()
-			return res, err
-		default:
-			return []byte{}, errors.New("Unknown string encode type ")
-		}
-	}
-
-	res := make([]byte, length)
-	_, err = io.ReadFull(r.handler, res)
-	return res, err
-}
-
-func (r *RDBParser) loadUint16() (res uint16, err error) {
-	_, err = io.ReadFull(r.handler, buff[:2])
-	if err != nil {
-		return
-	}
-
-	res = binary.LittleEndian.Uint16(buff[:2])
-	return
-}
-
-func (r *RDBParser) loadUint32() (res uint32, err error) {
-	_, err = io.ReadFull(r.handler, buff[:4])
-	if err != nil {
-		return
-	}
-	res = binary.LittleEndian.Uint32(buff[:4])
-	return
-}
-
-func (r *RDBParser) loadFloat() (float64, error) {
-	b, err := r.handler.ReadByte()
-	if err != nil {
-		return 0, err
-	}
-	if b == 0xff {
-		return NegInf, nil
-	} else if b == 0xfe {
-		return PosInf, nil
-	} else if b == 0xfd {
-		return Nan, nil
-	}
-
-	floatBytes := make([]byte, b)
-	_, err = io.ReadFull(r.handler, floatBytes)
-	if err != nil {
-		return 0, err
-	}
-	float, err := strconv.ParseFloat(string(floatBytes)+`\0`, 64)
-	return float, err
-}
-
-// 8 bytes float64, follow IEEE754 float64 stddef (standard definitions)
-func (r *RDBParser) loadBinaryFloat() (float64, error) {
-	if _, err := io.ReadFull(r.handler, buff); err != nil {
-		return 0, err
-	}
-	bits := binary.LittleEndian.Uint64(buff)
-	return math.Float64frombits(bits), nil
-}
-
-func (r *RDBParser) loadZipMap(key []byte, expire int) error {
-	zipmap, err := r.loadString()
-	if err != nil {
-		return err
-	}
-	buf := newBuffer(zipmap)
-	blen, err := buf.ReadByte()
-	if err != nil {
-		return err
-	}
-
-	length := int(blen)
-	if blen > 254 {
-		length, err = countZipmapItems(buf)
-		if err != nil {
-			return err
-		}
-		length /= 2
-	}
-
-	for i := 0; i < length; i++ {
-		field, err := loadZipmapItem(buf, false)
-		if err != nil {
-			return err
-		}
-		value, err := loadZipmapItem(buf, true)
-		if err != nil {
-			return err
-		}
-		r.output.HSet(key, field, value, expire)
-	}
-	return nil
-}
-
-func (r *RDBParser) loadZipList(key []byte, expire int) ([][]byte, error) {
-	b, err := r.loadString()
-	if err != nil {
-		return nil, err
-	}
-	buf := newBuffer(b)
-	length, err := loadZiplistLength(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	ziplistItem := make([][]byte, 0, length)
-	for i := int64(0); i < length; i++ {
-		entry, err := loadZiplistEntry(buf)
-		if err != nil {
-			return nil, err
-		}
-		ziplistItem = append(ziplistItem, entry)
-	}
-
-	return ziplistItem, nil
-}
-
-func (r *RDBParser) loadIntSet(key []byte, expire int) error {
-	b, err := r.loadString()
-	if err != nil {
-		return err
-	}
-	buf := newBuffer(b)
-	sizeBytes, err := buf.Slice(4)
-	if err != nil {
-		return err
-	}
-	intSize := binary.LittleEndian.Uint32(sizeBytes)
-	if intSize != 2 && intSize != 4 && intSize != 8 {
-		return errors.New(fmt.Sprintf("unknown intset encoding: %d", intSize))
-	}
-	lenBytes, err := buf.Slice(4)
-	if err != nil {
-		return err
-	}
-	cardinality := binary.LittleEndian.Uint32(lenBytes)
-	intSetItem := make([][]byte, cardinality)
-
-	for i := uint32(0); i < cardinality; i++ {
-		intBytes, err := buf.Slice(int(intSize))
-		if err != nil {
-			return err
-		}
-		var intString string
-		switch intSize {
-		case 2:
-			intString = strconv.FormatInt(int64(int16(binary.LittleEndian.Uint16(intBytes))), 10)
-		case 4:
-			intString = strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))), 10)
-		case 8:
-			intString = strconv.FormatInt(int64(int64(binary.LittleEndian.Uint64(intBytes))), 10)
-		}
-		intSetItem = append(intSetItem, []byte(intString))
-	}
-	r.output.SAdd(key, expire, intSetItem...)
-	return nil
-}
-
-func (r *RDBParser) loadZiplistZset(key []byte, expire int) error {
-	ziplist, err := r.loadString()
-	if err != nil {
-		return err
-	}
-	buf := newBuffer(ziplist)
-	cardinality, err := loadZiplistLength(buf)
-	if err != nil {
-		return err
-	}
-	cardinality /= 2
-	for i := int64(0); i < cardinality; i++ {
-		member, err := loadZiplistEntry(buf)
-		if err != nil {
-			return err
-		}
-		scoreBytes, err := loadZiplistEntry(buf)
-		if err != nil {
-			return err
-		}
-		score, err := strconv.ParseFloat(string(scoreBytes), 64)
-		if err != nil {
-			return err
-		}
-		r.output.ZSet(key, member, score)
-	}
-
-	return nil
-}
-
-func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
-	ziplist, err := r.loadString()
-	if err != nil {
-		return err
-	}
-	buf := newBuffer(ziplist)
-	length, err := loadZiplistLength(buf)
-	if err != nil {
-		return err
-	}
-	length /= 2
-	for i := int64(0); i < length; i++ {
-		field, err := loadZiplistEntry(buf)
-		if err != nil {
-			return err
-		}
-		value, err := loadZiplistEntry(buf)
-		if err != nil {
-			return err
-		}
-		r.output.HSet(key, field, value, expire)
-	}
-	return nil
-
-}
-
 func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 	convertExpire := int(expire)
 	if t == RO_TYPE_STRING {
@@ -506,22 +233,21 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 		if err != nil {
 			return err
 		}
-		//slistCollect := make([][]byte, length)
+		listItems := make([][]byte, 0, length)
 		for i := uint64(0); i < length; i++ {
 			val, err := r.loadString()
 			if err != nil {
 				return err
 			}
-			//listCollect = append(listCollect, val)
-			r.output.List(key, convertExpire, val)
+			listItems = append(listItems, val)
 		}
-
+		r.output.List(key, convertExpire, listItems...)
 	} else if t == RO_TYPE_SET {
 		length, _, err := r.loadLen()
 		if err != nil {
 			return err
 		}
-		setCollect := make([][]byte, length)
+		setCollect := make([][]byte, 0, length)
 		for i := uint64(0); i < length; i++ {
 			member, err := r.loadString()
 			if err != nil {
@@ -577,7 +303,7 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 		}
 
 		for i := uint64(0); i < length; i++ {
-			listItems, err := r.loadZipList(key, convertExpire)
+			listItems, err := r.loadZipList()
 			if err != nil {
 				return err
 			}
@@ -586,65 +312,371 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 	} else if t == RO_TYPE_HASH_ZIPMAP {
 		return r.loadZipMap(key, convertExpire)
 	} else if t == RO_TYPE_LIST_ZIPLIST {
-		_, err := r.loadZipList(key, convertExpire)
+		listItems, err := r.loadZipList()
+		if err != nil {
+			return err
+		}
+		r.output.List(key, convertExpire, listItems...)
 		return err
 	} else if t == RO_TYPE_SET_INTSET {
-		return r.loadIntSet(key, convertExpire)
+		intSet, err := r.loadIntSet()
+		if err != nil {
+			return err
+		}
+		r.output.SAdd(key, convertExpire, intSet...)
+		return err
 	} else if t == RO_TYPE_ZSET_ZIPLIST {
 		return r.loadZiplistZset(key, convertExpire)
 	} else if t == RO_TYPE_HASH_ZIPLIST {
 		return r.loadZiplistHash(key, convertExpire)
+	} else if t == RO_TYPE_STREAM_LISTPACKS {
+		listpacks, _, err := r.loadLen()
+		if err != nil {
+			return err
+		}
+		for i := uint64(0); i < listpacks; i++ {
+			_, err := r.loadString()
+			if err != nil {
+				return err
+			}
+			_, err = r.loadString()
+			if err != nil {
+				return err
+			}
+		}
+		length, _, err := r.loadLen()
+		ms, _, err := r.loadLen()
+		seq, _, err := r.loadLen()
+		cgroups_count, _, err := r.loadLen()
+		r.free(length, ms, seq)
+		//fmt.Println(length, ms, seq, cgroups_count)
+		for i := uint64(0); i < cgroups_count; i++ {
+			cgname, err := r.loadString()
+			if err != nil {
+				return errors.New(" read error consumer group name")
+			}
+			cgms, _, err := r.loadLen()
+			if err != nil {
+				return err
+			}
+			cgseq, _, err := r.loadLen()
+			if err != nil {
+				return err
+			}
+			r.free(cgname, cgms, cgseq)
+
+			perlSize, _, err := r.loadLen()
+
+			size := 2 * unsafe.Sizeof(uint64(0))
+			b := make([]byte, size)
+			for j := uint64(0); j < perlSize; j++ {
+				_, err := io.ReadFull(r.handler, b)
+				if err != nil {
+					return err
+				}
+				_, err = io.ReadFull(r.handler, buff)
+				if err != nil {
+					return nil
+				}
+				expireTime := uint64(binary.LittleEndian.Uint64(buff))
+				count, _, err := r.loadLen()
+				if err != nil {
+					return err
+				}
+				fmt.Println(expireTime, count)
+			}
+
+			consumers, _, err := r.loadLen()
+			if err != nil {
+				return err
+			}
+			for i := uint64(0); i < consumers; i++ {
+
+			}
+		}
+
+		return nil
 	}
 
 	return nil
 }
 
-func (r *RDBParser) loadLZF() (res []byte, err error) {
-	ilength, _, err := r.loadLen()
+func (r *RDBParser) loadLen() (length uint64, isEncode bool, err error) {
+	buf, err := r.handler.ReadByte()
 	if err != nil {
 		return
 	}
-	ulength, _, err := r.loadLen()
-	if err != nil {
-		return
+	typeLen := (buf & 0xc0) >> 6
+	if typeLen == RDB_ENCVAL || typeLen == RDB_6BIT {
+		/* Read a 6 bit encoding type or 6 bit len. */
+		if typeLen == RDB_ENCVAL { // This value need go on decode.
+			isEncode = true
+		}
+		length = uint64(buf) & 0x3f
+	} else if typeLen == RDB_14BIT {
+		/* Read a 14 bit len, need read next byte. */
+		nb, err := r.handler.ReadByte()
+		if err != nil {
+			return 0, false, err
+		}
+		length = (uint64(buf)&0x3f)<<8 | uint64(nb)
+	} else if buf == RDB_32BIT {
+		_, err = io.ReadFull(r.handler, buff[0:4])
+		if err != nil {
+			return
+		}
+		length = uint64(binary.BigEndian.Uint32(buff))
+	} else if buf == RDB_64BIT {
+		_, err = io.ReadFull(r.handler, buff)
+		if err != nil {
+			return
+		}
+		length = binary.BigEndian.Uint64(buff)
+	} else {
+		err = errors.New(fmt.Sprintf("unknown length encoding %d in loadLen()", typeLen))
 	}
-	val := make([]byte, ilength)
-	_, err = io.ReadFull(r.handler, val)
-	if err != nil {
-		return
-	}
-	res = lzfDecompress(val, int(ilength), int(ulength))
+
 	return
 }
 
-func lzfDecompress(in []byte, inLen, outLen int) []byte {
-	out := make([]byte, outLen)
-	for i, o := 0, 0; i < inLen; {
-		ctrl := int(in[i])
-		i++
-		if ctrl < 1<<5 {
-			for x := 0; x <= ctrl; x++ {
-				out[o] = in[i]
-				i++
-				o++
-			}
-		} else {
-			length := ctrl >> 5
-			if length == 7 {
-				length += int(in[i])
-				i++
-			}
-			ref := o - ((ctrl & 0x1f) << 8) - int(in[i]) - 1
-			i++
-			for x := 0; x <= length+1; x++ {
-				out[o] = out[ref]
-				ref++
-				o++
-			}
+func (r *RDBParser) loadString() ([]byte, error) {
+	length, needEncode, err := r.loadLen()
+	if err != nil {
+		return nil, err
+	}
+
+	if needEncode {
+		switch length {
+		case RDB_ENCODE_INT8:
+			b, err := r.handler.ReadByte()
+			return []byte(strconv.Itoa(int(int8(b)))), err
+		case RDB_ENCODE_INT16:
+			b, err := r.loadUint16()
+			return []byte(strconv.Itoa(int(int16(b)))), err
+		case RDB_ENCODE_INT32:
+			b, err := r.loadUint32()
+			return []byte(strconv.Itoa(int(int32(b)))), err
+		case RDB_ENCODE_LZF:
+			res, err := r.loadLZFCompress()
+			return res, err
+		default:
+			return []byte{}, errors.New("Unknown string encode type ")
 		}
 	}
 
-	return out
+	res := make([]byte, length)
+	_, err = io.ReadFull(r.handler, res)
+	return res, err
+}
+
+func (r *RDBParser) loadUint16() (res uint16, err error) {
+	_, err = io.ReadFull(r.handler, buff[:2])
+	if err != nil {
+		return
+	}
+
+	res = binary.LittleEndian.Uint16(buff[:2])
+	return
+}
+
+func (r *RDBParser) loadUint32() (res uint32, err error) {
+	_, err = io.ReadFull(r.handler, buff[:4])
+	if err != nil {
+		return
+	}
+	res = binary.LittleEndian.Uint32(buff[:4])
+	return
+}
+
+func (r *RDBParser) loadFloat() (float64, error) {
+	var float float64
+	b, err := r.handler.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	if b == 0xff {
+		return NegInf, nil
+	} else if b == 0xfe {
+		return PosInf, nil
+	} else if b == 0xfd {
+		return Nan, nil
+	}
+
+	floatBytes := make([]byte, b)
+	_, err = io.ReadFull(r.handler, floatBytes)
+	if err != nil {
+		return 0, err
+	}
+	float, err = strconv.ParseFloat(string(floatBytes), 64)
+
+	return float, err
+}
+
+// 8 bytes float64, follow IEEE754 float64 stddef (standard definitions)
+func (r *RDBParser) loadBinaryFloat() (float64, error) {
+	if _, err := io.ReadFull(r.handler, buff); err != nil {
+		return 0, err
+	}
+	bits := binary.LittleEndian.Uint64(buff)
+	return math.Float64frombits(bits), nil
+}
+
+func (r *RDBParser) loadZipMap(key []byte, expire int) error {
+	zipmap, err := r.loadString()
+	if err != nil {
+		return err
+	}
+	buf := newBuffer(zipmap)
+	blen, err := buf.ReadByte()
+	if err != nil {
+		return err
+	}
+
+	length := int(blen)
+	if blen > 254 {
+		length, err = countZipmapItems(buf)
+		if err != nil {
+			return err
+		}
+		length /= 2
+	}
+
+	for i := 0; i < length; i++ {
+		field, err := loadZipmapItem(buf, false)
+		if err != nil {
+			return err
+		}
+		value, err := loadZipmapItem(buf, true)
+		if err != nil {
+			return err
+		}
+		r.output.HSet(key, field, value, expire)
+	}
+	return nil
+}
+
+func (r *RDBParser) loadZipList() ([][]byte, error) {
+	b, err := r.loadString()
+	if err != nil {
+		return nil, err
+	}
+	buf := newBuffer(b)
+	length, err := loadZiplistLength(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	ziplistItem := make([][]byte, 0, length)
+	for i := int64(0); i < length; i++ {
+		entry, err := loadZiplistEntry(buf)
+		if err != nil {
+			return nil, err
+		}
+		ziplistItem = append(ziplistItem, entry)
+	}
+
+	return ziplistItem, nil
+}
+
+func (r *RDBParser) loadIntSet() ([][]byte, error) {
+	b, err := r.loadString()
+	if err != nil {
+		return nil, err
+	}
+	buf := newBuffer(b)
+	sizeBytes, err := buf.Slice(4)
+	if err != nil {
+		return nil, err
+	}
+	intSize := binary.LittleEndian.Uint32(sizeBytes)
+	if intSize != 2 && intSize != 4 && intSize != 8 {
+		return nil, errors.New(fmt.Sprintf("unknown intset encoding: %d", intSize))
+	}
+	lenBytes, err := buf.Slice(4)
+	if err != nil {
+		return nil, err
+	}
+
+	length := binary.LittleEndian.Uint32(lenBytes)
+	intSetItem := make([][]byte, 0, length)
+	for i := uint32(0); i < length; i++ {
+		intBytes, err := buf.Slice(int(intSize))
+		if err != nil {
+			return nil, err
+		}
+		var intString string
+		switch intSize {
+		case 2:
+			intString = strconv.FormatInt(int64(int16(binary.LittleEndian.Uint16(intBytes))), 10)
+		case 4:
+			intString = strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))), 10)
+		case 8:
+			intString = strconv.FormatInt(int64(int64(binary.LittleEndian.Uint64(intBytes))), 10)
+		}
+		intSetItem = append(intSetItem, []byte(intString))
+	}
+
+	return intSetItem, nil
+}
+
+func (r *RDBParser) loadZiplistZset(key []byte, expire int) error {
+	ziplist, err := r.loadString()
+	if err != nil {
+		return err
+	}
+	buf := newBuffer(ziplist)
+	length, err := loadZiplistLength(buf)
+	if err != nil {
+		return err
+	}
+	length /= 2
+	for i := int64(0); i < length; i++ {
+		member, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		scoreBytes, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		score, err := strconv.ParseFloat(string(scoreBytes), 64)
+		if err != nil {
+			return err
+		}
+		r.output.ZSet(key, member, score)
+	}
+
+	return nil
+}
+
+func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
+	ziplist, err := r.loadString()
+	if err != nil {
+		return err
+	}
+	buf := newBuffer(ziplist)
+	length, err := loadZiplistLength(buf)
+	if err != nil {
+		return err
+	}
+	length /= 2
+	for i := int64(0); i < length; i++ {
+		field, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		value, err := loadZiplistEntry(buf)
+		if err != nil {
+			return err
+		}
+		r.output.HSet(key, field, value, expire)
+	}
+	return nil
+}
+
+func (r *RDBParser) loadStreamListPack(key []byte, expire int) error {
+
+	return nil
 }
 
 func loadZipmapItem(buf *buffer, readFree bool) ([]byte, error) {
@@ -778,4 +810,57 @@ func loadZiplistEntry(buf *buffer) ([]byte, error) {
 	}
 
 	return nil, errors.New(fmt.Sprintf("rdb: unknown ziplist header byte: %d", header))
+}
+
+// LZF uncompress
+func (r *RDBParser) loadLZFCompress() (res []byte, err error) {
+	ilength, _, err := r.loadLen()
+	if err != nil {
+		return
+	}
+	ulength, _, err := r.loadLen()
+	if err != nil {
+		return
+	}
+	val := make([]byte, ilength)
+	_, err = io.ReadFull(r.handler, val)
+	if err != nil {
+		return
+	}
+	res = LzfDecompress(val, int(ilength), int(ulength))
+	return
+}
+
+func LzfDecompress(in []byte, inLen, outLen int) []byte {
+	out := make([]byte, outLen)
+	for i, o := 0, 0; i < inLen; {
+		ctrl := int(in[i])
+		i++
+		if ctrl < 1<<5 {
+			for x := 0; x <= ctrl; x++ {
+				out[o] = in[i]
+				i++
+				o++
+			}
+		} else {
+			length := ctrl >> 5
+			if length == 7 {
+				length += int(in[i])
+				i++
+			}
+			ref := o - ((ctrl & 0x1f) << 8) - int(in[i]) - 1
+			i++
+			for x := 0; x <= length+1; x++ {
+				out[o] = out[ref]
+				ref++
+				o++
+			}
+		}
+	}
+
+	return out
+}
+
+func (r *RDBParser) free(val ...interface{}) {
+
 }
