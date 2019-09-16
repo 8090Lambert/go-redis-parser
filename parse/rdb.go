@@ -338,16 +338,7 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 	} else if t == RO_TYPE_HASH_ZIPLIST {
 		return r.loadZiplistHash(key, convertExpire)
 	} else if t == RO_TYPE_STREAM_LISTPACKS {
-		listpacks, err := r.loadStreamListPack()
-		listpacks, _, err := r.loadLen()
-		if err != nil {
-			return err
-		}
-		for i := uint64(0); i < listpacks; i++ {
-
-		}
-
-		return nil
+		return r.loadStreamListPack()
 	}
 
 	return nil
@@ -627,6 +618,20 @@ func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
 }
 
 func (r *RDBParser) loadStreamListPack() error {
+	listpacks, _, err := r.loadLen()
+	if err != nil {
+		return err
+	}
+
+	for i := uint64(0); i < listpacks; i++ {
+		b, err := r.loadString()
+		if err != nil {
+			return err
+		}
+		buf := newBuffer(b)
+		fmt.Println(buf.)
+
+	}
 
 	return nil
 }
