@@ -11,7 +11,6 @@ import (
 	"math"
 	"os"
 	"strconv"
-	"unsafe"
 )
 
 const (
@@ -33,6 +32,7 @@ const (
 	RO_TYPE_LIST_QUICKLIST
 	RO_TYPE_STREAM_LISTPACKS
 
+	// Redis RDB protocol
 	RDB_OPCODE_IDLE          = 248 /* LRU idle time. */
 	RDB_OPCODE_FREQ          = 249 /* LFU frequency. */
 	RDB_OPCODE_AUX           = 250 /* RDB aux field. */
@@ -42,22 +42,30 @@ const (
 	RDB_OPCODE_SELECTDB      = 254 /* DB number of the following keys. */
 	RDB_OPCODE_EOF           = 255
 
+	// Redis length type
 	RDB_6BIT   = 0
 	RDB_14BIT  = 1
 	RDB_32BIT  = 0x80
 	RDB_64BIT  = 0x81
 	RDB_ENCVAL = 3
 
+	// Redis ziplist types
 	ZIP_STR_06B = 0
 	ZIP_STR_14B = 1
 	ZIP_STR_32B = 2
 
-	ZIP_INT_16B = 0xc0 | 0<<4
-	ZIP_INT_32B = 0xc0 | 1<<4
-	ZIP_INT_64B = 0xc0 | 2<<4
-	ZIP_INT_24B = 0xc0 | 3<<4
-	ZIP_INT_8B  = 0xfe
+	// Redis string type
+	RDB_LOAD_NONE  = 0
+	RDB_LOAD_ENC   = 1 << 0
+	RDB_LOAD_PLAIN = 1 << 1
+
+	// Redis ziplist entry
 	ZIP_INT_4B  = 15
+	ZIP_INT_8B  = 0xfe        // 11111110
+	ZIP_INT_16B = 0xc0 | 0<<4 // 11000000
+	ZIP_INT_24B = 0xc0 | 3<<4 // 11110000
+	ZIP_INT_32B = 0xc0 | 1<<4 // 11010000
+	ZIP_INT_64B = 0xc0 | 2<<4 //11100000
 
 	ZIP_BIG_PREVLEN = 0xfe
 )
@@ -330,69 +338,13 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 	} else if t == RO_TYPE_HASH_ZIPLIST {
 		return r.loadZiplistHash(key, convertExpire)
 	} else if t == RO_TYPE_STREAM_LISTPACKS {
+		listpacks, err := r.loadStreamListPack()
 		listpacks, _, err := r.loadLen()
 		if err != nil {
 			return err
 		}
 		for i := uint64(0); i < listpacks; i++ {
-			_, err := r.loadString()
-			if err != nil {
-				return err
-			}
-			_, err = r.loadString()
-			if err != nil {
-				return err
-			}
-		}
-		length, _, err := r.loadLen()
-		ms, _, err := r.loadLen()
-		seq, _, err := r.loadLen()
-		cgroups_count, _, err := r.loadLen()
-		r.free(length, ms, seq)
-		//fmt.Println(length, ms, seq, cgroups_count)
-		for i := uint64(0); i < cgroups_count; i++ {
-			cgname, err := r.loadString()
-			if err != nil {
-				return errors.New(" read error consumer group name")
-			}
-			cgms, _, err := r.loadLen()
-			if err != nil {
-				return err
-			}
-			cgseq, _, err := r.loadLen()
-			if err != nil {
-				return err
-			}
-			r.free(cgname, cgms, cgseq)
 
-			perlSize, _, err := r.loadLen()
-
-			size := 2 * unsafe.Sizeof(uint64(0))
-			b := make([]byte, size)
-			for j := uint64(0); j < perlSize; j++ {
-				_, err := io.ReadFull(r.handler, b)
-				if err != nil {
-					return err
-				}
-				_, err = io.ReadFull(r.handler, buff)
-				if err != nil {
-					return nil
-				}
-				expireTime := uint64(binary.LittleEndian.Uint64(buff))
-				count, _, err := r.loadLen()
-				if err != nil {
-					return err
-				}
-				fmt.Println(expireTime, count)
-			}
-
-			consumers, _, err := r.loadLen()
-			if err != nil {
-				return err
-			}
-			for i := uint64(0); i < consumers; i++ {
-
-			}
 		}
 
 		return nil
@@ -402,38 +354,38 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 }
 
 func (r *RDBParser) loadLen() (length uint64, isEncode bool, err error) {
-	buf, err := r.handler.ReadByte()
+	rawByte, err := r.handler.ReadByte()
 	if err != nil {
 		return
 	}
-	typeLen := (buf & 0xc0) >> 6
-	if typeLen == RDB_ENCVAL || typeLen == RDB_6BIT {
+	theType := (rawByte & 0xc0) >> 6
+	if theType == RDB_ENCVAL || theType == RDB_6BIT {
 		/* Read a 6 bit encoding type or 6 bit len. */
-		if typeLen == RDB_ENCVAL { // This value need go on decode.
+		if theType == RDB_ENCVAL { // This value need go on decode.
 			isEncode = true
 		}
-		length = uint64(buf) & 0x3f
-	} else if typeLen == RDB_14BIT {
+		length = uint64(rawByte) & 0x3f
+	} else if theType == RDB_14BIT {
 		/* Read a 14 bit len, need read next byte. */
 		nb, err := r.handler.ReadByte()
 		if err != nil {
 			return 0, false, err
 		}
-		length = (uint64(buf)&0x3f)<<8 | uint64(nb)
-	} else if buf == RDB_32BIT {
+		length = (uint64(rawByte)&0x3f)<<8 | uint64(nb)
+	} else if rawByte == RDB_32BIT {
 		_, err = io.ReadFull(r.handler, buff[0:4])
 		if err != nil {
 			return
 		}
 		length = uint64(binary.BigEndian.Uint32(buff))
-	} else if buf == RDB_64BIT {
+	} else if rawByte == RDB_64BIT {
 		_, err = io.ReadFull(r.handler, buff)
 		if err != nil {
 			return
 		}
 		length = binary.BigEndian.Uint64(buff)
 	} else {
-		err = errors.New(fmt.Sprintf("unknown length encoding %d in loadLen()", typeLen))
+		err = errors.New(fmt.Sprintf("unknown length encoding %d in loadLen()", theType))
 	}
 
 	return
@@ -449,13 +401,13 @@ func (r *RDBParser) loadString() ([]byte, error) {
 		switch length {
 		case RDB_ENCODE_INT8:
 			b, err := r.handler.ReadByte()
-			return []byte(strconv.Itoa(int(int8(b)))), err
+			return []byte(strconv.FormatInt(int64(int8(uint8(b))), 10)), err
 		case RDB_ENCODE_INT16:
 			b, err := r.loadUint16()
-			return []byte(strconv.Itoa(int(int16(b)))), err
+			return []byte(strconv.FormatInt(int64(int16(b)), 10)), err
 		case RDB_ENCODE_INT32:
 			b, err := r.loadUint32()
-			return []byte(strconv.Itoa(int(int32(b)))), err
+			return []byte(strconv.FormatInt(int64(int32(b)), 10)), err
 		case RDB_ENCODE_LZF:
 			res, err := r.loadLZFCompress()
 			return res, err
@@ -674,7 +626,7 @@ func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
 	return nil
 }
 
-func (r *RDBParser) loadStreamListPack(key []byte, expire int) error {
+func (r *RDBParser) loadStreamListPack() error {
 
 	return nil
 }
@@ -777,12 +729,24 @@ func loadZiplistEntry(buf *buffer) ([]byte, error) {
 			return nil, err
 		}
 		return buf.Slice(int(binary.BigEndian.Uint32(lenBytes)))
+	case header>>4 == ZIP_INT_4B:
+		return []byte(strconv.FormatInt(int64(header&0x0f)-1, 10)), nil
+	case header == ZIP_INT_8B:
+		b, err := buf.ReadByte()
+		return []byte(strconv.FormatInt(int64(int8(b)), 10)), err
 	case header == ZIP_INT_16B:
 		intBytes, err := buf.Slice(2)
 		if err != nil {
 			return nil, err
 		}
 		return []byte(strconv.FormatInt(int64(int16(binary.LittleEndian.Uint16(intBytes))), 10)), nil
+	case header == ZIP_INT_24B:
+		intBytes := make([]byte, 4)
+		_, err := buf.Read(intBytes[1:])
+		if err != nil {
+			return nil, err
+		}
+		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))>>8), 10)), nil
 	case header == ZIP_INT_32B:
 		intBytes, err := buf.Slice(4)
 		if err != nil {
@@ -795,21 +759,102 @@ func loadZiplistEntry(buf *buffer) ([]byte, error) {
 			return nil, err
 		}
 		return []byte(strconv.FormatInt(int64(binary.LittleEndian.Uint64(intBytes)), 10)), nil
-	case header == ZIP_INT_24B:
+	}
+
+	return nil, errors.New(fmt.Sprintf("rdb: unknown ziplist header byte: %d", header))
+}
+
+func loadListPackEntry(buf *buffer) ([]byte, error) {
+	special, err := buf.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]byte, 0)
+	skip := 0
+	if special&0x80 == 0 {
+		skip = 1
+		res = []byte(strconv.FormatInt(int64(special&0x7F), 10))
+	} else if special&0xC0 == 0x80 {
+		length := special & 0x3F
+		skip = 1 + int(length)
+		res, err = buf.Slice(int(length))
+		if err != nil {
+			return nil, err
+		}
+	} else if special&0xE0 == 0xC0 {
+		skip = 2
+		next, err := buf.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		res = []byte(strconv.FormatInt(int64((((special&0x1F)<<8)|next)<<19>>19), 10))
+	} else if special&0xFF == 0xF1 {
+		skip = 3
+		res, err = buf.Slice(2)
+		if err != nil {
+			return nil, err
+		}
+	} else if special&0xFF == 0xF2 {
+		skip = 4
 		intBytes := make([]byte, 4)
 		_, err := buf.Read(intBytes[1:])
 		if err != nil {
 			return nil, err
 		}
-		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))>>8), 10)), nil
-	case header == ZIP_INT_8B:
+		res = []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))>>8), 10))
+	} else if special&0xFF == 0xF3 {
+		skip = 5
+		intBytes, err := buf.Slice(4)
+		if err != nil {
+			return nil, err
+		}
+		res = []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))), 10))
+	} else if special&0xFF == 0xF4 {
+		skip = 9
+		intBytes, err := buf.Slice(8)
+		if err != nil {
+			return nil, err
+		}
+		res = []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint64(intBytes))), 10))
+	} else if special&0xF0 == 0xE0 {
 		b, err := buf.ReadByte()
-		return []byte(strconv.FormatInt(int64(int8(b)), 10)), err
-	case header>>4 == ZIP_INT_4B:
-		return []byte(strconv.FormatInt(int64(header&0x0f)-1, 10)), nil
+		if err != nil {
+			return nil, err
+		}
+		length := ((special & 0x0F) << 8) | b
+		skip = 2 + int(length)
+		res, err = buf.Slice(int(length))
+		if err != nil {
+			return nil, err
+		}
+	} else if special&0xFF == 0xf0 {
+		lenBytes, err := buf.Slice(4)
+		if err != nil {
+			return nil, err
+		}
+		length := binary.BigEndian.Uint32(lenBytes)
+		skip = 5 + int(length)
+		res, err = buf.Slice(int(length))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, errors.New("unknown encoding type")
 	}
 
-	return nil, errors.New(fmt.Sprintf("rdb: unknown ziplist header byte: %d", header))
+	if skip <= 127 {
+		buf.Seek(1, 1)
+	} else if skip < 16383 {
+		buf.Seek(2, 1)
+	} else if skip < 2097151 {
+		buf.Seek(3, 1)
+	} else if skip < 268435455 {
+		buf.Seek(4, 1)
+	} else {
+		buf.Seek(5, 1)
+	}
+	return res, err
 }
 
 // LZF uncompress
