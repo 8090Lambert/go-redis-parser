@@ -55,11 +55,6 @@ const (
 	ZIP_STR_14B = 1
 	ZIP_STR_32B = 2
 
-	// Redis string type
-	RDB_LOAD_NONE  = 0
-	RDB_LOAD_ENC   = 1 << 0
-	RDB_LOAD_PLAIN = 1 << 1
-
 	// Redis ziplist entry
 	ZIP_INT_4B  = 15
 	ZIP_INT_8B  = 0xfe        // 11111110
@@ -344,7 +339,7 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 	} else if t == RO_TYPE_HASH_ZIPLIST {
 		return r.loadZiplistHash(key, convertExpire)
 	} else if t == RO_TYPE_STREAM_LISTPACKS {
-		fmt.Println(key)
+		fmt.Println(string(key))
 		_, err := r.loadStreamListPack()
 		return err
 	}
@@ -625,13 +620,13 @@ func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
 	return nil
 }
 
-func (r *RDBParser) loadStreamListPack() (map[string]map[string]string, error) {
+func (r *RDBParser) loadStreamListPack() (map[string]string, error) {
 	listpacks, _, err := r.loadLen()
 	if err != nil {
 		return nil, err
 	}
 
-	listPackStreams := make(map[string]map[string]map[string]string, listpacks)
+	entries := make(map[string]string, listpacks)
 	for i := uint64(0); i < listpacks; i++ {
 		headerBytes, err := r.loadString()
 		if err != nil {
@@ -653,24 +648,27 @@ func (r *RDBParser) loadStreamListPack() (map[string]map[string]string, error) {
 		// Skip the header.
 		// 4b total-bytes + 2b num-elements
 		lp.Seek(6, 1)
-		streams, err := loadStreamItem(lp)
+		entry, err := loadStreamItem(lp)
 		if err != nil {
 			return nil, err
 		}
-		listPackStreams[messageId] = streams
+		entryBytes, err := json.Marshal(entry)
+		if err != nil {
+			return nil, err
+		}
+		entries[messageId] = string(entryBytes)
 	}
 
 	length, _, _ := r.loadLen()
 	// group
 	msi64, _, _ := r.loadLen()
 	seqi64, _, _ := r.loadLen()
-
 	lastId := concatStreamId([]byte(strconv.Itoa(int(msi64))), []byte(strconv.Itoa(int(seqi64))))
+
 	groupCount, _, err := r.loadLen()
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(lastId)
 
 	/**
 	Redis group struct:
@@ -753,89 +751,13 @@ func (r *RDBParser) loadStreamListPack() (map[string]map[string]string, error) {
 		groupItem["consumers"] = string(consumersStr)
 		groups = append(groups)
 	}
-	//msiBytes := make([]byte, 8)
-	//lastId := concatStreamId()
 
-	return nil, nil
-}
+	entriesBytes, _ := json.Marshal(entries)
+	groupBytes, _ := json.Marshal(groups)
+	stream := map[string]string{"last_id": lastId, "length": strconv.Itoa(int(length)), "entries": string(entriesBytes), "groups": string(groupBytes)}
 
-func loadStreamItem(lp *buffer) (map[string]map[string]string, error) {
-	// Entry format:
-	// | count | deleted | num-fields | field_1 | field_2 | ... | field_N |0|
-	countBytes, err := loadListPackEntry(lp)
-	if err != nil {
-		return nil, err
-	}
-	count, _ := strconv.ParseInt(string(countBytes), 10, 64)
-	deletedBytes, err := loadListPackEntry(lp)
-	if err != nil {
-		return nil, err
-	}
-	deleted, _ := strconv.ParseInt(string(deletedBytes), 10, 64)
-	fieldsNumBytes, err := loadListPackEntry(lp)
-	if err != nil {
-		return nil, err
-	}
-	fieldsNum, _ := strconv.Atoi(string(fieldsNumBytes))
-	fieldCollect := make([][]byte, fieldsNum)
-	for i := 0; i < fieldsNum; i++ {
-		tmp, err := loadListPackEntry(lp)
-		if err != nil {
-			return nil, err
-		}
-		fieldCollect[i] = tmp
-	}
-	loadListPackEntry(lp)
-
-	total := count + deleted
-	allStreams := make(map[string]map[string]string, total)
-	for i := int64(0); i < total; i++ {
-		storage := make(map[string]string)
-		flagBytes, err := loadListPackEntry(lp)
-		if err != nil {
-			return nil, err
-		}
-		flag, _ := strconv.Atoi(string(flagBytes))
-		msBytes, err := loadListPackEntry(lp) // ms
-		if err != nil {
-			return nil, err
-		}
-		seqBytes, err := loadListPackEntry(lp) // seq
-		if err != nil {
-			return nil, err
-		}
-		messageId := concatStreamId(msBytes, seqBytes)
-
-		if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
-			fieldsNumBytes, err := loadListPackEntry(lp)
-			if err != nil {
-				return nil, err
-			}
-			fieldsNum, _ = strconv.Atoi(string(fieldsNumBytes))
-		}
-		for i := 0; i < fieldsNum; i++ {
-			fieldBytes := fieldCollect[i]
-			if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
-				fieldBytes, err = loadListPackEntry(lp)
-				if err != nil {
-					return nil, err
-				}
-			}
-			vBytes, err := loadListPackEntry(lp)
-			if err != nil {
-				return nil, err
-			}
-			storage[string(fieldBytes)] = string(vBytes)
-		}
-		allStreams[messageId] = storage
-		loadListPackEntry(lp)
-	}
-	endBytes, err := lp.ReadByte()
-	if endBytes != 255 {
-		return nil, errors.New("ListPack expect 255 with end")
-	}
-
-	return allStreams, nil
+	fmt.Println(stream)
+	return stream, nil
 }
 
 func loadZipmapItem(buf *buffer, readFree bool) ([]byte, error) {
@@ -969,6 +891,94 @@ func loadZiplistEntry(buf *buffer) ([]byte, error) {
 	}
 
 	return nil, errors.New(fmt.Sprintf("rdb: unknown ziplist header byte: %d", header))
+}
+
+func loadStreamItem(lp *buffer) (map[string]string, error) {
+	// Entry format:
+	// | count | deleted | num-fields | field_1 | field_2 | ... | field_N |0|
+	countBytes, err := loadListPackEntry(lp)
+	if err != nil {
+		return nil, err
+	}
+	count, _ := strconv.ParseInt(string(countBytes), 10, 64)
+	deletedBytes, err := loadListPackEntry(lp)
+	if err != nil {
+		return nil, err
+	}
+	deleted, _ := strconv.ParseInt(string(deletedBytes), 10, 64)
+	fieldsNumBytes, err := loadListPackEntry(lp)
+	if err != nil {
+		return nil, err
+	}
+	fieldsNum, _ := strconv.Atoi(string(fieldsNumBytes))
+	fieldCollect := make([][]byte, fieldsNum)
+	for i := 0; i < fieldsNum; i++ {
+		tmp, err := loadListPackEntry(lp)
+		if err != nil {
+			return nil, err
+		}
+		fieldCollect[i] = tmp
+	}
+	loadListPackEntry(lp)
+
+	total := count + deleted
+	allStreams := make(map[string]string, total)
+	for i := int64(0); i < total; i++ {
+		flagBytes, err := loadListPackEntry(lp)
+		if err != nil {
+			return nil, err
+		}
+		flag, _ := strconv.Atoi(string(flagBytes))
+		msBytes, err := loadListPackEntry(lp) // ms
+		if err != nil {
+			return nil, err
+		}
+		seqBytes, err := loadListPackEntry(lp) // seq
+		if err != nil {
+			return nil, err
+		}
+		messageId := concatStreamId(msBytes, seqBytes)
+		hasDelete := "false"
+		if flag&STREAM_ITEM_FLAG_DELETED != 0 {
+			hasDelete = "true"
+		}
+		if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
+			fieldsNumBytes, err := loadListPackEntry(lp)
+			if err != nil {
+				return nil, err
+			}
+			fieldsNum, _ = strconv.Atoi(string(fieldsNumBytes))
+		}
+		fields := make(map[string]string, fieldsNum)
+		for i := 0; i < fieldsNum; i++ {
+			fieldBytes := fieldCollect[i]
+			if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
+				fieldBytes, err = loadListPackEntry(lp)
+				if err != nil {
+					return nil, err
+				}
+			}
+			vBytes, err := loadListPackEntry(lp)
+			if err != nil {
+				return nil, err
+			}
+			fields[string(fieldBytes)] = string(vBytes)
+		}
+		fieldBytes, _ := json.Marshal(fields)
+		terms := map[string]string{
+			"has_delted": hasDelete,
+			"fields":     string(fieldBytes),
+		}
+		termsBytes, _ := json.Marshal(terms)
+		allStreams[messageId] = string(termsBytes)
+		loadListPackEntry(lp)
+	}
+	endBytes, err := lp.ReadByte()
+	if endBytes != 255 {
+		return nil, errors.New("ListPack expect 255 with end")
+	}
+
+	return allStreams, nil
 }
 
 func loadListPackEntry(buf *buffer) ([]byte, error) {
