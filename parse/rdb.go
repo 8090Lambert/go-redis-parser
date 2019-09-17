@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/8090Lambert/go-redis-parser/generator"
@@ -68,6 +69,11 @@ const (
 	ZIP_INT_64B = 0xc0 | 2<<4 //11100000
 
 	ZIP_BIG_PREVLEN = 0xfe
+
+	// Redis listpack
+	STREAM_ITEM_FLAG_NONE       = 0      /* No special flags. */
+	STREAM_ITEM_FLAG_DELETED    = 1 << 0 /* Entry was deleted. Skip it. */
+	STREAM_ITEM_FLAG_SAMEFIELDS = 1 << 1 /* Same fields as master entry. */
 )
 
 const (
@@ -338,7 +344,9 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 	} else if t == RO_TYPE_HASH_ZIPLIST {
 		return r.loadZiplistHash(key, convertExpire)
 	} else if t == RO_TYPE_STREAM_LISTPACKS {
-		return r.loadStreamListPack()
+		fmt.Println(key)
+		_, err := r.loadStreamListPack()
+		return err
 	}
 
 	return nil
@@ -617,23 +625,217 @@ func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
 	return nil
 }
 
-func (r *RDBParser) loadStreamListPack() error {
+func (r *RDBParser) loadStreamListPack() (map[string]map[string]string, error) {
 	listpacks, _, err := r.loadLen()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	listPackStreams := make(map[string]map[string]map[string]string, listpacks)
 	for i := uint64(0); i < listpacks; i++ {
-		b, err := r.loadString()
+		headerBytes, err := r.loadString()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		buf := newBuffer(b)
-		fmt.Println(buf.)
+		header := newBuffer(headerBytes)
+		msBytes, err := header.Slice(8) // ms
+		if err != nil {
+			return nil, err
+		}
+		seqBytes, err := header.Slice(8) // seq
+		if err != nil {
+			return nil, err
+		}
+		messageId := concatStreamId(msBytes, seqBytes)
 
+		listpackBytes, err := r.loadString()
+		lp := newBuffer(listpackBytes)
+		// Skip the header.
+		// 4b total-bytes + 2b num-elements
+		lp.Seek(6, 1)
+		streams, err := loadStreamItem(lp)
+		if err != nil {
+			return nil, err
+		}
+		listPackStreams[messageId] = streams
 	}
 
-	return nil
+	length, _, _ := r.loadLen()
+	// group
+	msi64, _, _ := r.loadLen()
+	seqi64, _, _ := r.loadLen()
+
+	lastId := concatStreamId([]byte(strconv.Itoa(int(msi64))), []byte(strconv.Itoa(int(seqi64))))
+	groupCount, _, err := r.loadLen()
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(lastId)
+
+	/**
+	Redis group struct:
+	typedef struct streamCG {
+		streamID last_id
+		rax *pel
+		rax *consumers;
+	}
+	*/
+	groups := make([]map[string]string, 0, groupCount)
+	for i := uint64(0); i < groupCount; i++ {
+		gName, err := r.loadString()
+		if err != nil {
+			return nil, err
+		}
+		msi64, _, _ = r.loadLen()
+		seqi64, _, _ = r.loadLen()
+		// last_id
+		groupLastid := concatStreamId([]byte(strconv.Itoa(int(msi64))), []byte(strconv.Itoa(int(seqi64))))
+		groupItem := map[string]string{
+			"group_name": string(gName),
+			"last_id":    groupLastid,
+		}
+
+		// global pel
+		pel, _, _ := r.loadLen()
+		groupPendingEntries := make(map[string]map[string]string, pel)
+		for i := uint64(0); i < pel; i++ {
+			io.ReadFull(r.handler, buff)
+			msBytes := buff
+			io.ReadFull(r.handler, buff)
+			seqBytes := buff
+			rawId := concatStreamId(msBytes, seqBytes)
+			io.ReadFull(r.handler, buff)
+			deliveryTime := uint64(binary.LittleEndian.Uint64(buff))
+			deliveryCount, _, _ := r.loadLen()
+			item := map[string]string{"delivery_time": strconv.Itoa(int(deliveryTime)), "delivery_count": strconv.Itoa(int(deliveryCount))}
+			groupPendingEntries[rawId] = item
+		}
+
+		// consumer
+		consumerCount, _, _ := r.loadLen()
+		consumers := make([]map[string]string, 0, consumerCount)
+		for i := uint64(0); i < consumerCount; i++ {
+			cName, err := r.loadString()
+			if err != nil {
+				return nil, err
+			}
+			io.ReadFull(r.handler, buff)
+			seenTime := uint64(binary.LittleEndian.Uint64(buff))
+			consumerItem := map[string]string{
+				"consumer_name": string(cName),
+				"seen_time":     strconv.Itoa(int(seenTime)),
+			}
+
+			// consumer pel
+			pel, _, _ := r.loadLen()
+			consumersPendingEntries := make(map[string]map[string]string, pel)
+			for i := uint64(0); i < pel; i++ {
+				io.ReadFull(r.handler, buff)
+				msBytes := buff
+				io.ReadFull(r.handler, buff)
+				seqBytes := buff
+				rawId := concatStreamId(msBytes, seqBytes)
+
+				itemBytes, _ := json.Marshal(consumerItem)
+				groupPendingEntries[rawId]["consumer"] = string(itemBytes)
+				//entryString, _ := json.Marshal(groupPendingEntries[rawId])
+				consumersPendingEntries[rawId] = groupPendingEntries[rawId]
+			}
+			pendingEntryString, _ := json.Marshal(consumersPendingEntries)
+			consumerItem["pendings"] = string(pendingEntryString)
+			consumers = append(consumers, consumerItem)
+		}
+
+		//
+		gpendingString, _ := json.Marshal(groupPendingEntries)
+		groupItem["pendings"] = string(gpendingString)
+		consumersStr, _ := json.Marshal(consumers)
+		groupItem["consumers"] = string(consumersStr)
+		groups = append(groups)
+	}
+	//msiBytes := make([]byte, 8)
+	//lastId := concatStreamId()
+
+	return nil, nil
+}
+
+func loadStreamItem(lp *buffer) (map[string]map[string]string, error) {
+	// Entry format:
+	// | count | deleted | num-fields | field_1 | field_2 | ... | field_N |0|
+	countBytes, err := loadListPackEntry(lp)
+	if err != nil {
+		return nil, err
+	}
+	count, _ := strconv.ParseInt(string(countBytes), 10, 64)
+	deletedBytes, err := loadListPackEntry(lp)
+	if err != nil {
+		return nil, err
+	}
+	deleted, _ := strconv.ParseInt(string(deletedBytes), 10, 64)
+	fieldsNumBytes, err := loadListPackEntry(lp)
+	if err != nil {
+		return nil, err
+	}
+	fieldsNum, _ := strconv.Atoi(string(fieldsNumBytes))
+	fieldCollect := make([][]byte, fieldsNum)
+	for i := 0; i < fieldsNum; i++ {
+		tmp, err := loadListPackEntry(lp)
+		if err != nil {
+			return nil, err
+		}
+		fieldCollect[i] = tmp
+	}
+	loadListPackEntry(lp)
+
+	total := count + deleted
+	allStreams := make(map[string]map[string]string, total)
+	for i := int64(0); i < total; i++ {
+		storage := make(map[string]string)
+		flagBytes, err := loadListPackEntry(lp)
+		if err != nil {
+			return nil, err
+		}
+		flag, _ := strconv.Atoi(string(flagBytes))
+		msBytes, err := loadListPackEntry(lp) // ms
+		if err != nil {
+			return nil, err
+		}
+		seqBytes, err := loadListPackEntry(lp) // seq
+		if err != nil {
+			return nil, err
+		}
+		messageId := concatStreamId(msBytes, seqBytes)
+
+		if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
+			fieldsNumBytes, err := loadListPackEntry(lp)
+			if err != nil {
+				return nil, err
+			}
+			fieldsNum, _ = strconv.Atoi(string(fieldsNumBytes))
+		}
+		for i := 0; i < fieldsNum; i++ {
+			fieldBytes := fieldCollect[i]
+			if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
+				fieldBytes, err = loadListPackEntry(lp)
+				if err != nil {
+					return nil, err
+				}
+			}
+			vBytes, err := loadListPackEntry(lp)
+			if err != nil {
+				return nil, err
+			}
+			storage[string(fieldBytes)] = string(vBytes)
+		}
+		allStreams[messageId] = storage
+		loadListPackEntry(lp)
+	}
+	endBytes, err := lp.ReadByte()
+	if endBytes != 255 {
+		return nil, errors.New("ListPack expect 255 with end")
+	}
+
+	return allStreams, nil
 }
 
 func loadZipmapItem(buf *buffer, readFree bool) ([]byte, error) {
@@ -848,6 +1050,7 @@ func loadListPackEntry(buf *buffer) ([]byte, error) {
 		return nil, errors.New("unknown encoding type")
 	}
 
+	// element-total-len
 	if skip <= 127 {
 		buf.Seek(1, 1)
 	} else if skip < 16383 {
@@ -860,6 +1063,10 @@ func loadListPackEntry(buf *buffer) ([]byte, error) {
 		buf.Seek(5, 1)
 	}
 	return res, err
+}
+
+func concatStreamId(ms, seq []byte) string {
+	return string(ms) + "-" + string(seq)
 }
 
 // LZF uncompress
