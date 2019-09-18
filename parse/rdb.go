@@ -83,10 +83,11 @@ const (
 )
 
 var (
-	buff   = make([]byte, 8)
-	PosInf = math.Inf(1)
-	NegInf = math.Inf(-1)
-	Nan    = math.NaN()
+	version = 0
+	buff    = make([]byte, 8)
+	PosInf  = math.Inf(1)
+	NegInf  = math.Inf(-1)
+	Nan     = math.NaN()
 )
 
 type RDBParser struct {
@@ -204,30 +205,25 @@ func (r *RDBParser) Analyze() error {
 	return nil
 }
 
-func (r *RDBParser) LayoutCheck() (bool, error) {
-	if err := r.header(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 // 9 bytes length include: 5 bytes "REDIS" and 4 bytes version in rdb.file
-func (r *RDBParser) header() error {
+func (r *RDBParser) LayoutCheck() (bool, error) {
 	header := make([]byte, 9)
 	_, err := io.ReadFull(r.handler, header)
 	if err != nil {
 		if err == io.EOF {
-			return errors.New("RDB file is empty")
+			return false, errors.New("RDB file is empty")
 		}
-		return errors.New("Read RDB file failed, error: " + err.Error())
+		return false, errors.New("Read RDB file failed, error: " + err.Error())
 	}
 
 	// Check "REDIS" string and version.
-	if version, err := strconv.Atoi(string(header[5:])); !bytes.Equal(header[0:5], []byte(REDIS)) || err != nil || (version < RDB_VERSION_MIN || version > RDB_VERSION_MAX) {
-		return errors.New("RDB file version is wrong")
+	rdbVersion, err := strconv.Atoi(string(header[5:]))
+	if !bytes.Equal(header[0:5], []byte(REDIS)) || err != nil || (rdbVersion < RDB_VERSION_MIN || rdbVersion > RDB_VERSION_MAX) {
+		return false, errors.New("RDB file version is wrong")
 	}
+	version = rdbVersion
 
-	return nil
+	return true, nil
 }
 
 func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
@@ -243,13 +239,11 @@ func (r *RDBParser) loadObject(key []byte, t byte, expire uint64) error {
 		if err != nil {
 			return err
 		}
-		//slistCollect := make([][]byte, length)
 		for i := uint64(0); i < length; i++ {
 			val, err := r.loadString()
 			if err != nil {
 				return err
 			}
-			//listCollect = append(listCollect, val)
 			r.output.List(key, convertExpire, val)
 		}
 
