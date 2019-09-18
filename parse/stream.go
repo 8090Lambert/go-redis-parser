@@ -5,18 +5,18 @@ import (
 	"io"
 )
 
-type buffer struct {
+type stream struct {
 	data  []byte
 	index int
 }
 
-func newBuffer(data []byte) *buffer {
-	return &buffer{
+func newBuffer(data []byte) *stream {
+	return &stream{
 		data: data,
 	}
 }
 
-func (buf *buffer) Slice(n int) ([]byte, error) {
+func (buf *stream) Slice(n int) ([]byte, error) {
 	if buf.index+n > len(buf.data) {
 		return nil, io.EOF
 	}
@@ -25,7 +25,7 @@ func (buf *buffer) Slice(n int) ([]byte, error) {
 	return b, nil
 }
 
-func (buf *buffer) ReadByte() (byte, error) {
+func (buf *stream) ReadByte() (byte, error) {
 	if buf.index >= len(buf.data) {
 		return 0, io.EOF
 	}
@@ -34,7 +34,7 @@ func (buf *buffer) ReadByte() (byte, error) {
 	return b, nil
 }
 
-func (buf *buffer) Read(b []byte) (int, error) {
+func (buf *stream) Read(b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
@@ -46,7 +46,7 @@ func (buf *buffer) Read(b []byte) (int, error) {
 	return n, nil
 }
 
-func (buf *buffer) Seek(offset int64, whence int) (int64, error) {
+func (buf *stream) Seek(offset int64, whence int) (int64, error) {
 	var abs int64
 	switch whence {
 	case 0:
