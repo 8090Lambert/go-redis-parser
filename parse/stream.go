@@ -10,7 +10,7 @@ type stream struct {
 	index int
 }
 
-func newBuffer(data []byte) *stream {
+func newStream(data []byte) *stream {
 	return &stream{
 		data: data,
 	}

@@ -462,7 +462,7 @@ func (r *RDBParser) loadZipMap(key []byte, expire int) error {
 	if err != nil {
 		return err
 	}
-	buf := newBuffer(zipmap)
+	buf := newStream(zipmap)
 	blen, err := buf.ReadByte()
 	if err != nil {
 		return err
@@ -496,7 +496,7 @@ func (r *RDBParser) loadZipList(key []byte, expire int) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	buf := newBuffer(b)
+	buf := newStream(b)
 	length, err := loadZiplistLength(buf)
 	if err != nil {
 		return nil, err
@@ -519,7 +519,7 @@ func (r *RDBParser) loadIntSet(key []byte, expire int) error {
 	if err != nil {
 		return err
 	}
-	buf := newBuffer(b)
+	buf := newStream(b)
 	sizeBytes, err := buf.Slice(4)
 	if err != nil {
 		return err
@@ -560,7 +560,7 @@ func (r *RDBParser) loadZiplistZset(key []byte, expire int) error {
 	if err != nil {
 		return err
 	}
-	buf := newBuffer(ziplist)
+	buf := newStream(ziplist)
 	cardinality, err := loadZiplistLength(buf)
 	if err != nil {
 		return err
@@ -590,7 +590,7 @@ func (r *RDBParser) loadZiplistHash(key []byte, expire int) error {
 	if err != nil {
 		return err
 	}
-	buf := newBuffer(ziplist)
+	buf := newStream(ziplist)
 	length, err := loadZiplistLength(buf)
 	if err != nil {
 		return err
@@ -647,7 +647,7 @@ func (r *RDBParser) loadStreamEntry() (map[string]interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
-		header := newBuffer(streamAuxBytes)
+		header := newStream(streamAuxBytes)
 		msBytes, err := header.Slice(8) // ms
 		if err != nil {
 			return nil, err
@@ -659,7 +659,7 @@ func (r *RDBParser) loadStreamEntry() (map[string]interface{}, error) {
 		messageId := concatStreamId(msBytes, seqBytes)
 
 		headerBytes, err := r.loadString()
-		lp := newBuffer(headerBytes)
+		lp := newStream(headerBytes)
 		// Skip the header.
 		// 4b total-bytes + 2b num-elements
 		lp.Seek(6, 1)
