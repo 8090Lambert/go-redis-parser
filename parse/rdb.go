@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/crc"
 	"github.com/8090Lambert/go-redis-parser/generator"
 	"io"
 	"math"
@@ -112,7 +113,6 @@ func (r *RDBParser) Analyze() error {
 
 	var lru_idle, lfu_freq int64
 	var expire uint64
-	//var expire uint64 = -1
 	var hasSelectDb bool
 	for {
 		// Begin analyze
@@ -183,7 +183,11 @@ func (r *RDBParser) Analyze() error {
 			r.output.SelectDb(int(dbid))
 			continue
 		} else if t == RDB_OPCODE_EOF {
-			//continue
+			checkSum, err := r.loadEOF(version)
+			if err != nil {
+				return errors.New("Parse EOF err : " + err.Error())
+			}
+			verifyDump(checkSum)
 			return nil
 		} else {
 			key, err := r.loadString()
@@ -755,6 +759,19 @@ func (r *RDBParser) loadStreamGroup() ([]map[string]interface{}, error) {
 	return groups, nil
 }
 
+func (r *RDBParser) loadEOF(version int) (checkSum []byte, err error) {
+	if version >= 5 {
+		_, err = io.ReadFull(r.handler, buff)
+		if err != nil {
+			return checkSum, errors.New("Parse Check_sum failed: " + err.Error())
+		}
+		//checkSum = uint64(binary.LittleEndian.Uint64(buff))
+		checkSum = buff
+		return
+	}
+	return
+}
+
 func (r *RDBParser) loadLZF() (res []byte, err error) {
 	ilength, _, err := r.loadLen()
 	if err != nil {
@@ -1118,4 +1135,21 @@ func loadStreamListPackEntry(buf *stream) ([]byte, error) {
 
 func concatStreamId(ms, seq []byte) string {
 	return string(ms) + "-" + string(seq)
+}
+
+func verifyDump(d []byte) error {
+	fmt.Println("checksum", binary.LittleEndian.Uint64(d[len(d)-8:]) == crc.Digest(d[:len(d)-8]), crc.Digest(d[:len(d)-8]))
+	if len(d) < 10 {
+		return fmt.Errorf("rdb: invalid dump length")
+	}
+	version := binary.LittleEndian.Uint16(d[len(d)-10:])
+	if version != uint16(6) {
+		return fmt.Errorf("rdb: invalid version %d, expecting %d", version, 6)
+	}
+
+	if binary.LittleEndian.Uint64(d[len(d)-8:]) != crc.Digest(d[:len(d)-8]) {
+		return fmt.Errorf("rdb: invalid CRC checksum")
+	}
+
+	return nil
 }

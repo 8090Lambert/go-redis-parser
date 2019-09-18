@@ -140,3 +140,7 @@ func Crc64(crc uint64, s []byte) uint64 {
 	}
 	return crc
 }
+
+func Digest(b []byte) uint64 {
+	return Crc64(0, b)
+}
