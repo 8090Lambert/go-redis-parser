@@ -219,7 +219,6 @@ func (r *RDBParser) LayoutCheck() (bool, error) {
 	if !bytes.Equal(header[0:5], []byte(REDIS)) || err != nil || (rdbVersion < RDB_VERSION_MIN || rdbVersion > RDB_VERSION_MAX) {
 		return false, errors.New("RDB file version is wrong")
 	}
-	version = rdbVersion
 
 	return true, nil
 }
