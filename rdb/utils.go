@@ -112,7 +112,7 @@ func loadZiplistEntry(buf *stream) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if prevLen == ZIP_BIG_PREVLEN {
+	if prevLen == ZipBigPrevLen {
 		buf.Seek(4, 1) // skip the 4-byte prevlen
 	}
 
@@ -121,49 +121,49 @@ func loadZiplistEntry(buf *stream) ([]byte, error) {
 		return nil, err
 	}
 	switch {
-	case header>>6 == ZIP_STR_06B:
+	case header>>6 == ZipStr06B:
 		return buf.Slice(int(header & 0x3f))
-	case header>>6 == ZIP_STR_14B:
+	case header>>6 == ZipStr14B:
 		b, err := buf.ReadByte()
 		if err != nil {
 			return nil, err
 		}
 		return buf.Slice((int(header&0x3f) << 8) | int(b))
-	case header>>6 == ZIP_STR_32B:
+	case header>>6 == ZipStr32B:
 		lenBytes, err := buf.Slice(4)
 		if err != nil {
 			return nil, err
 		}
 		return buf.Slice(int(binary.BigEndian.Uint32(lenBytes)))
-	case header == ZIP_INT_16B:
+	case header == ZipInt16B:
 		intBytes, err := buf.Slice(2)
 		if err != nil {
 			return nil, err
 		}
 		return []byte(strconv.FormatInt(int64(int16(binary.LittleEndian.Uint16(intBytes))), 10)), nil
-	case header == ZIP_INT_32B:
+	case header == ZipInt32B:
 		intBytes, err := buf.Slice(4)
 		if err != nil {
 			return nil, err
 		}
 		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))), 10)), nil
-	case header == ZIP_INT_64B:
+	case header == ZipInt64B:
 		intBytes, err := buf.Slice(8)
 		if err != nil {
 			return nil, err
 		}
 		return []byte(strconv.FormatInt(int64(binary.LittleEndian.Uint64(intBytes)), 10)), nil
-	case header == ZIP_INT_24B:
+	case header == ZipInt24B:
 		intBytes := make([]byte, 4)
 		_, err := buf.Read(intBytes[1:])
 		if err != nil {
 			return nil, err
 		}
 		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))>>8), 10)), nil
-	case header == ZIP_INT_8B:
+	case header == ZipInt08B:
 		b, err := buf.ReadByte()
 		return []byte(strconv.FormatInt(int64(int8(b)), 10)), err
-	case header>>4 == ZIP_INT_4B:
+	case header>>4 == ZipInt04B:
 		return []byte(strconv.FormatInt(int64(header&0x0f)-1, 10)), nil
 	}
 

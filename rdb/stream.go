@@ -70,10 +70,10 @@ func loadStreamItem(lp *stream) (map[string]interface{}, error) {
 		}
 		messageId := concatStreamId(msBytes, seqBytes)
 		hasDelete := "false"
-		if flag&STREAM_ITEM_FLAG_DELETED != 0 {
+		if flag&StreamItemFlagDeleted != 0 {
 			hasDelete = "true"
 		}
-		if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
+		if flag&StreamItemFlagSameFields == 0 {
 			fieldsNumBytes, err := loadStreamListPackEntry(lp)
 			if err != nil {
 				return nil, err
@@ -83,7 +83,7 @@ func loadStreamItem(lp *stream) (map[string]interface{}, error) {
 		fields := make(map[string]interface{}, fieldsNum)
 		for i := 0; i < fieldsNum; i++ {
 			fieldBytes := fieldCollect[i]
-			if flag&STREAM_ITEM_FLAG_SAMEFIELDS == 0 {
+			if flag&StreamItemFlagSameFields == 0 {
 				fieldBytes, err = loadStreamListPackEntry(lp)
 				if err != nil {
 					return nil, err

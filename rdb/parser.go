@@ -17,70 +17,70 @@ import (
 
 const (
 	// Redis Object type
-	RO_TYPE_STRING = iota
-	RO_TYPE_LIST
-	RO_TYPE_SET
-	RO_TYPE_ZSET
-	RO_TYPE_HASH
-	RO_TYPE_ZSET_2 /* ZSET version 2 with doubles stored in binary. */
-	RO_TYPE_MODULE
-	RO_TYPE_MODULE_2
+	TypeString = iota
+	TypeList
+	TypeSet
+	TypeZset
+	TypeHash
+	TypeZset2 /* ZSET version 2 with doubles stored in binary. */
+	TypeModule
+	TypeModule2
 	_
-	RO_TYPE_HASH_ZIPMAP
-	RO_TYPE_LIST_ZIPLIST
-	RO_TYPE_SET_INTSET
-	RO_TYPE_ZSET_ZIPLIST
-	RO_TYPE_HASH_ZIPLIST
-	RO_TYPE_LIST_QUICKLIST
-	RO_TYPE_STREAM_LISTPACKS
+	TypeHashZipMap
+	TypeListZipList
+	TypeSetIntSet
+	TypeZsetZipList
+	TypeHashZipList
+	TypeListQuickList
+	TypeStreamListPacks
 
 	// Redis RDB protocol
-	RDB_OPCODE_IDLE          = 248 /* LRU idle time. */
-	RDB_OPCODE_FREQ          = 249 /* LFU frequency. */
-	RDB_OPCODE_AUX           = 250 /* RDB aux field. */
-	RDB_OPCODE_RESIZEDB      = 251 /* Hash table resize hint. */
-	RDB_OPCODE_EXPIRETIME_MS = 252 /* Expire time in milliseconds. */
-	RDB_OPCODE_EXPIRETIME    = 253 /* Old expire time in seconds. */
-	RDB_OPCODE_SELECTDB      = 254 /* DB number of the following keys. */
-	RDB_OPCODE_EOF           = 255
+	FlagOpcodeIdle         = 248 /* LRU idle time. */
+	FlagOpcodeFreq         = 249 /* LFU frequency. */
+	FlagOpcodeAux          = 250 /* RDB aux field. */
+	FlagOpcodeResizeDB     = 251 /* Hash table resize hint. */
+	FlagOpcodeExpireTimeMs = 252 /* Expire time in milliseconds. */
+	FlagOpcodeExpireTime   = 253 /* Old expire time in seconds. */
+	FlagOpcodeSelectDB     = 254 /* DB number of the following keys. */
+	FlagOpcodeEOF          = 255
 
 	// Redis length type
-	RDB_6BIT   = 0
-	RDB_14BIT  = 1
-	RDB_32BIT  = 0x80
-	RDB_64BIT  = 0x81
-	RDB_ENCVAL = 3
+	Type6Bit   = 0
+	Type14Bit  = 1
+	Type32Bit  = 0x80
+	Type64Bit  = 0x81
+	TypeEncVal = 3
 
 	// Redis ziplist types
-	ZIP_STR_06B = 0
-	ZIP_STR_14B = 1
-	ZIP_STR_32B = 2
+	ZipStr06B = 0
+	ZipStr14B = 1
+	ZipStr32B = 2
 
 	// Redis ziplist entry
-	ZIP_INT_4B  = 15
-	ZIP_INT_8B  = 0xfe        // 11111110
-	ZIP_INT_16B = 0xc0 | 0<<4 // 11000000
-	ZIP_INT_24B = 0xc0 | 3<<4 // 11110000
-	ZIP_INT_32B = 0xc0 | 1<<4 // 11010000
-	ZIP_INT_64B = 0xc0 | 2<<4 //11100000
+	ZipInt04B = 15
+	ZipInt08B = 0xfe        // 11111110
+	ZipInt16B = 0xc0 | 0<<4 // 11000000
+	ZipInt24B = 0xc0 | 3<<4 // 11110000
+	ZipInt32B = 0xc0 | 1<<4 // 11010000
+	ZipInt64B = 0xc0 | 2<<4 //11100000
 
-	ZIP_BIG_PREVLEN = 0xfe
+	ZipBigPrevLen = 0xfe
 
 	// Redis listpack
-	STREAM_ITEM_FLAG_NONE       = 0      /* No special flags. */
-	STREAM_ITEM_FLAG_DELETED    = 1 << 0 /* Entry was deleted. Skip it. */
-	STREAM_ITEM_FLAG_SAMEFIELDS = 1 << 1 /* Same fields as master entry. */
+	StreamItemFlagNone       = 0      /* No special flags. */
+	StreamItemFlagDeleted    = 1 << 0 /* Entry was deleted. Skip it. */
+	StreamItemFlagSameFields = 1 << 1 /* Same fields as master entry. */
 )
 
 const (
-	RDB_ENCODE_INT8 = iota
-	RDB_ENCODE_INT16
-	RDB_ENCODE_INT32
-	RDB_ENCODE_LZF
+	EncodeInt8 = iota
+	EncodeInt16
+	EncodeInt32
+	EncodeLZF
 
-	REDIS           = "REDIS"
-	RDB_VERSION_MIN = 1
-	RDB_VERSION_MAX = 9
+	REDIS      = "REDIS"
+	VersionMin = 1
+	VersionMax = 9
 )
 
 var (
@@ -131,7 +131,7 @@ func (r *ParseRdb) Parse() error {
 		if err != nil {
 			break
 		}
-		if t == RDB_OPCODE_IDLE {
+		if t == FlagOpcodeIdle {
 			qword, _, err := r.loadLen()
 			if err != nil {
 				return err
@@ -139,7 +139,7 @@ func (r *ParseRdb) Parse() error {
 			lru_idle = int64(qword)
 			r.output.LRU(lru_idle)
 			continue
-		} else if t == RDB_OPCODE_FREQ {
+		} else if t == FlagOpcodeFreq {
 			b, err := r.handler.ReadByte()
 			if err != nil {
 				return err
@@ -147,7 +147,7 @@ func (r *ParseRdb) Parse() error {
 			lfu_freq = int64(b)
 			r.output.LFU(lfu_freq)
 			continue
-		} else if t == RDB_OPCODE_AUX {
+		} else if t == FlagOpcodeAux {
 			key, err := r.loadString()
 			if err != nil {
 				return errors.New("Parse Aux key failed: " + err.Error())
@@ -158,7 +158,7 @@ func (r *ParseRdb) Parse() error {
 			}
 			r.output.AuxField(key, val)
 			continue
-		} else if t == RDB_OPCODE_RESIZEDB {
+		} else if t == FlagOpcodeResizeDB {
 			dbSize, _, err := r.loadLen()
 			if err != nil {
 				return errors.New("Parse ResizeDB size failed: " + err.Error())
@@ -169,21 +169,21 @@ func (r *ParseRdb) Parse() error {
 			}
 			r.output.ResizeDB(dbSize, expiresSize)
 			continue
-		} else if t == RDB_OPCODE_EXPIRETIME_MS {
+		} else if t == FlagOpcodeExpireTimeMs {
 			_, err := io.ReadFull(r.handler, buff)
 			if err != nil {
 				return errors.New("Parse ExpireTime_ms failed: " + err.Error())
 			}
 			expire = int64(binary.LittleEndian.Uint64(buff))
 			continue
-		} else if t == RDB_OPCODE_EXPIRETIME {
+		} else if t == FlagOpcodeExpireTime {
 			_, err := io.ReadFull(r.handler, buff)
 			if err != nil {
 				return errors.New("Parse ExpireTime failed: " + err.Error())
 			}
 			expire = int64(binary.LittleEndian.Uint64(buff)) * 1000
 			continue
-		} else if t == RDB_OPCODE_SELECTDB {
+		} else if t == FlagOpcodeSelectDB {
 			if hasSelectDb == true {
 				continue
 			}
@@ -193,7 +193,7 @@ func (r *ParseRdb) Parse() error {
 			}
 			r.output.SelectDb(int(dbid))
 			continue
-		} else if t == RDB_OPCODE_EOF {
+		} else if t == FlagOpcodeEOF {
 			// TODO rdb checksum
 			return nil
 		} else {
@@ -229,7 +229,7 @@ func (r *ParseRdb) layoutCheck() (bool, error) {
 
 	// Check "REDIS" string and version.
 	rdbVersion, err := strconv.Atoi(string(header[5:]))
-	if !bytes.Equal(header[0:5], []byte(REDIS)) || err != nil || (rdbVersion < RDB_VERSION_MIN || rdbVersion > RDB_VERSION_MAX) {
+	if !bytes.Equal(header[0:5], []byte(REDIS)) || err != nil || (rdbVersion < VersionMin || rdbVersion > VersionMax) {
 		return false, errors.New("RDB file version is wrong")
 	}
 
@@ -238,15 +238,15 @@ func (r *ParseRdb) layoutCheck() (bool, error) {
 
 func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 	keyObj := NewKeyObject(key, expire)
-	if t == RO_TYPE_STRING {
+	if t == TypeString {
 		if err := r.readString(keyObj); err != nil {
 			return err
 		}
-	} else if t == RO_TYPE_LIST {
+	} else if t == TypeList {
 		if err := r.readList(keyObj); err != nil {
 			return err
 		}
-	} else if t == RO_TYPE_SET {
+	} else if t == TypeSet {
 		//length, _, err := r.loadLen()
 		//if err != nil {
 		//	return err
@@ -263,7 +263,7 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.readSet(keyObj); err != nil {
 			return err
 		}
-	} else if t == RO_TYPE_ZSET || t == RO_TYPE_ZSET_2 {
+	} else if t == TypeZset || t == TypeZset2 {
 		//length, _, err := r.loadLen()
 		//if err != nil {
 		//	return err
@@ -274,7 +274,7 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		//		return err
 		//	}
 		//	var score float64
-		//	if t == RO_TYPE_ZSET_2 {
+		//	if t == Type_ZSET_2 {
 		//		score, err = r.loadBinaryFloat()
 		//		if err != nil {
 		//			return err
@@ -291,7 +291,7 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.readZSet(keyObj, t); err != nil {
 			return err
 		}
-	} else if t == RO_TYPE_HASH {
+	} else if t == TypeHash {
 		//length, _, err := r.loadLen()
 		//if err != nil {
 		//	return err
@@ -311,7 +311,7 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.readHashMap(keyObj); err != nil {
 			return err
 		}
-	} else if t == RO_TYPE_LIST_QUICKLIST { // quicklist + ziplist to realize linked list
+	} else if t == TypeListQuickList { // quicklist + ziplist to realize linked list
 		//length, _, err := r.loadLen()
 		//if err != nil {
 		//	return err
@@ -327,33 +327,33 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.readListWithQuickList(keyObj); err != nil {
 			return err
 		}
-	} else if t == RO_TYPE_HASH_ZIPMAP {
+	} else if t == TypeHashZipMap {
 		if err := r.readHashMapWithZipmap(keyObj); err != nil {
 			return err
 		}
 		//return r.loadZipMap()
-	} else if t == RO_TYPE_LIST_ZIPLIST {
+	} else if t == TypeListZipList {
 		if err := r.readListWithZipList(keyObj); err != nil {
 			return err
 		}
 		//_, err := r.loadZipList()
 		//return err
-	} else if t == RO_TYPE_SET_INTSET {
+	} else if t == TypeSetIntSet {
 		if err := r.readIntSet(keyObj); err != nil {
 			return err
 		}
 		//return r.loadIntSet(key, expire)
-	} else if t == RO_TYPE_ZSET_ZIPLIST {
+	} else if t == TypeZsetZipList {
 		if err := r.readZipListSortSet(keyObj); err != nil {
 			return err
 		}
 		//return r.loadZiplistZset(key, expire)
-	} else if t == RO_TYPE_HASH_ZIPLIST {
+	} else if t == TypeHashZipList {
 		if err := r.readHashMapZiplist(keyObj); err != nil {
 			return err
 		}
 		//return r.loadZiplistHash(key, expire)
-	} else if t == RO_TYPE_STREAM_LISTPACKS {
+	} else if t == TypeStreamListPacks {
 		_, err := r.loadStreamListPack()
 		return err
 	}
@@ -367,26 +367,26 @@ func (r *ParseRdb) loadLen() (length uint64, isEncode bool, err error) {
 		return
 	}
 	typeLen := (buf & 0xc0) >> 6
-	if typeLen == RDB_ENCVAL || typeLen == RDB_6BIT {
+	if typeLen == TypeEncVal || typeLen == Type6Bit {
 		/* Read a 6 bit encoding type or 6 bit len. */
-		if typeLen == RDB_ENCVAL {
+		if typeLen == TypeEncVal {
 			isEncode = true
 		}
 		length = uint64(buf) & 0x3f
-	} else if typeLen == RDB_14BIT {
+	} else if typeLen == Type14Bit {
 		/* Read a 14 bit len, need read next byte. */
 		nb, err := r.handler.ReadByte()
 		if err != nil {
 			return 0, false, err
 		}
 		length = (uint64(buf)&0x3f)<<8 | uint64(nb)
-	} else if buf == RDB_32BIT {
+	} else if buf == Type32Bit {
 		_, err = io.ReadFull(r.handler, buff[0:4])
 		if err != nil {
 			return
 		}
 		length = uint64(binary.BigEndian.Uint32(buff))
-	} else if buf == RDB_64BIT {
+	} else if buf == Type64Bit {
 		_, err = io.ReadFull(r.handler, buff)
 		if err != nil {
 			return
@@ -407,16 +407,16 @@ func (r *ParseRdb) loadString() ([]byte, error) {
 
 	if needEncode {
 		switch length {
-		case RDB_ENCODE_INT8:
+		case EncodeInt8:
 			b, err := r.handler.ReadByte()
 			return []byte(strconv.Itoa(int(b))), err
-		case RDB_ENCODE_INT16:
+		case EncodeInt16:
 			b, err := r.loadUint16()
 			return []byte(strconv.Itoa(int(b))), err
-		case RDB_ENCODE_INT32:
+		case EncodeInt32:
 			b, err := r.loadUint32()
 			return []byte(strconv.Itoa(int(b))), err
-		case RDB_ENCODE_LZF:
+		case EncodeLZF:
 			res, err := r.loadLZF()
 			return res, err
 		default:
