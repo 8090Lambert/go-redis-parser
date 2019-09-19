@@ -35,21 +35,21 @@ func (f *Putter) SelectDb(index int) {
 	fmt.Println(fmt.Sprintf("select db : %d", index))
 }
 
-func (f *Putter) Set(key, value []byte, expire int) {
+func (f *Putter) Set(key, value []byte, expire int64) {
 	fmt.Println(string(key), string(value), expire)
 }
 
-func (f *Putter) HSet(key, field, value []byte, expire int) {
+func (f *Putter) HSet(key, field, value []byte, expire int64) {
 	fmt.Println(string(key), string(field), string(value), expire)
 }
 
-func (f *Putter) SAdd(key []byte, expire int, member ...[]byte) {
+func (f *Putter) SAdd(key []byte, expire int64, member ...[]byte) {
 	for _, v := range member {
 		fmt.Println(string(key), string(v), expire)
 	}
 }
 
-func (f *Putter) List(key []byte, expire int, value ...[]byte) {
+func (f *Putter) List(key []byte, expire int64, value ...[]byte) {
 	for _, v := range value {
 		fmt.Println(string(key), string(v), " expire:", expire)
 	}

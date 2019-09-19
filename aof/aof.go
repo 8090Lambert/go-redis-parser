@@ -1,7 +1,8 @@
-package parse
+package aof
 
 import (
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/parse"
 	"os"
 )
 
@@ -9,7 +10,7 @@ type AOFParser struct {
 	handler *os.File
 }
 
-func AofNew(file string) Parser {
+func NewAof(file string) parse.Parser {
 	handler, err := os.Open(file)
 	if err != nil {
 		panic(err.Error())
@@ -18,11 +19,7 @@ func AofNew(file string) Parser {
 	return &AOFParser{handler: handler}
 }
 
-func (a *AOFParser) Analyze() error {
+func (a *AOFParser) Parse() error {
 	fmt.Println("aof")
 	return nil
-}
-
-func (a *AOFParser) LayoutCheck() (bool, error) {
-	return false, nil
 }

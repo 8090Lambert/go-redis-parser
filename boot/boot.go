@@ -2,9 +2,11 @@ package boot
 
 import (
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/aof"
 	"github.com/8090Lambert/go-redis-parser/command"
 	"github.com/8090Lambert/go-redis-parser/constants"
 	"github.com/8090Lambert/go-redis-parser/parse"
+	"github.com/8090Lambert/go-redis-parser/rdb"
 	"os"
 )
 
@@ -17,15 +19,27 @@ func Boot() {
 		panic(file + " not exist !")
 	}
 
-	factory := parse.NewParserFactory(mod)
+	factory := NewParserFactory(mod)
 	if factory == nil {
 		return
 	}
 
 	parser := factory(file)
-	err := parser.Analyze()
+	err := parser.Parse()
 	if err != nil {
-		fmt.Println("Analyze failed: " + err.Error())
+		fmt.Println("Parse failed: " + err.Error())
 		return
+	}
+}
+
+type Factory func(file string) parse.Parser
+
+func NewParserFactory(mod int) Factory {
+	if mod == constants.RDBMOD {
+		return rdb.NewRDB
+	} else if mod == constants.AOFMOD {
+		return aof.NewAof
+	} else {
+		return nil
 	}
 }
