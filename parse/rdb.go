@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/8090Lambert/go-redis-parser/crc"
 	"github.com/8090Lambert/go-redis-parser/generator"
 	"io"
 	"math"
@@ -84,11 +83,10 @@ const (
 )
 
 var (
-	version = 0
-	buff    = make([]byte, 8)
-	PosInf  = math.Inf(1)
-	NegInf  = math.Inf(-1)
-	Nan     = math.NaN()
+	buff   = make([]byte, 8)
+	PosInf = math.Inf(1)
+	NegInf = math.Inf(-1)
+	Nan    = math.NaN()
 )
 
 type RDBParser struct {
@@ -183,11 +181,7 @@ func (r *RDBParser) Analyze() error {
 			r.output.SelectDb(int(dbid))
 			continue
 		} else if t == RDB_OPCODE_EOF {
-			checkSum, err := r.loadEOF(version)
-			if err != nil {
-				return errors.New("Parse EOF err : " + err.Error())
-			}
-			verifyDump(checkSum)
+			// TODO rdb checksum
 			return nil
 		} else {
 			key, err := r.loadString()
@@ -1135,21 +1129,4 @@ func loadStreamListPackEntry(buf *stream) ([]byte, error) {
 
 func concatStreamId(ms, seq []byte) string {
 	return string(ms) + "-" + string(seq)
-}
-
-func verifyDump(d []byte) error {
-	fmt.Println("checksum", binary.LittleEndian.Uint64(d[len(d)-8:]) == crc.Digest(d[:len(d)-8]), crc.Digest(d[:len(d)-8]))
-	if len(d) < 10 {
-		return fmt.Errorf("rdb: invalid dump length")
-	}
-	version := binary.LittleEndian.Uint16(d[len(d)-10:])
-	if version != uint16(6) {
-		return fmt.Errorf("rdb: invalid version %d, expecting %d", version, 6)
-	}
-
-	if binary.LittleEndian.Uint64(d[len(d)-8:]) != crc.Digest(d[:len(d)-8]) {
-		return fmt.Errorf("rdb: invalid CRC checksum")
-	}
-
-	return nil
 }
