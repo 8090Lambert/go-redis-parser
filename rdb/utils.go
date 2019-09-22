@@ -135,6 +135,9 @@ func loadZiplistEntry(buf *stream) ([]byte, error) {
 			return nil, err
 		}
 		return buf.Slice(int(binary.BigEndian.Uint32(lenBytes)))
+	case header == ZipInt08B:
+		b, err := buf.ReadByte()
+		return []byte(strconv.FormatInt(int64(int8(b)), 10)), err
 	case header == ZipInt16B:
 		intBytes, err := buf.Slice(2)
 		if err != nil {
@@ -160,9 +163,6 @@ func loadZiplistEntry(buf *stream) ([]byte, error) {
 			return nil, err
 		}
 		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(intBytes))>>8), 10)), nil
-	case header == ZipInt08B:
-		b, err := buf.ReadByte()
-		return []byte(strconv.FormatInt(int64(int8(b)), 10)), err
 	case header>>4 == ZipInt04B:
 		return []byte(strconv.FormatInt(int64(header&0x0f)-1, 10)), nil
 	}

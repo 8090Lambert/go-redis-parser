@@ -23,16 +23,16 @@ func (f *Putter) Begin(version string) {
 }
 
 func (f *Putter) AuxField(key, value []byte) {
-	fmt.Println(fmt.Sprintf("auxkey: %s, auxval: %s", key, value))
+	//fmt.Println(fmt.Sprintf("auxkey: %s, auxval: %s", key, value))
 }
 
 func (f *Putter) ResizeDB(dbSize, expireSize uint64) {
 	// For the moment，should ignore.
-	fmt.Println("resize db:", dbSize, expireSize)
+	//fmt.Println("resize db:", dbSize, expireSize)
 }
 
 func (f *Putter) SelectDb(index int) {
-	fmt.Println(fmt.Sprintf("select db : %d", index))
+	//fmt.Println(fmt.Sprintf("select db : %d", index))
 }
 
 func (f *Putter) Set(key, value []byte, expire int64) {

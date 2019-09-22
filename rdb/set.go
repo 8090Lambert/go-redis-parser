@@ -71,7 +71,7 @@ func (r *ParseRdb) readIntSet(key KeyObject) error {
 		//intSetItem = append(intSetItem, []byte(intString))
 	}
 	//r.output.SAdd(key, expire, intSetItem...)
-	fmt.Println(set.String())
+	//fmt.Println(set.String())
 	r.data <- set
 	return nil
 }

@@ -29,7 +29,7 @@ func (r *ParseRdb) readZSet(key KeyObject, t byte) error {
 			return err
 		}
 		var score float64
-		if t == RO_TYPE_ZSET_2 {
+		if t == TypeZset2 {
 			score, err = r.loadBinaryFloat()
 		} else {
 			score, err = r.loadFloat()
