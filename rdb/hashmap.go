@@ -23,7 +23,7 @@ func (r *ParseRdb) readHashMap(key KeyObject) error {
 	if err != nil {
 		return err
 	}
-	hashTable := HashMap{Key: key, Len: length, Entry: make([]HashEntry, 0, length)}
+	hashTable := &HashMap{Key: key, Len: length, Entry: make([]HashEntry, 0, length)}
 	for i := uint64(0); i < length; i++ {
 		field, err := r.loadString()
 		if err != nil {
@@ -108,5 +108,5 @@ func (r *ParseRdb) readHashMapZiplist(key KeyObject) error {
 
 func (hm HashMap) String() string {
 	itemStr, _ := json.Marshal(hm.Entry)
-	return fmt.Sprintf("HashMap{Key: %s, Len: %d, Entries: %s}", ToString(hm.Key), hm.Len, ToString(itemStr))
+	return fmt.Sprintf("{HashMap: {Key: %s, Len: %d, Entries: %s}}", ToString(hm.Key), hm.Len, ToString(itemStr))
 }

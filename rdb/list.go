@@ -88,5 +88,5 @@ func (r *ParseRdb) loadZipList() ([][]byte, error) {
 }
 
 func (l ListObject) String() string {
-	return fmt.Sprintf("List{Key: %s, Len: %d, Items: %s}", ToString(l.Key), l.Len, strings.Join(l.Entries, ","))
+	return fmt.Sprintf("{List: {Key: %s, Len: %d, Items: %s}}", ToString(l.Key), l.Len, strings.Join(l.Entries, ","))
 }

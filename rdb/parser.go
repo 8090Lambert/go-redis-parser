@@ -93,7 +93,6 @@ type ParseRdb struct {
 	handler *bufio.Reader
 	output  generator.Putter
 	data    chan interface{}
-	exit    chan struct{}
 }
 
 func NewRDB(file string) parse.Parser {
@@ -106,14 +105,18 @@ func NewRDB(file string) parse.Parser {
 }
 
 func (r *ParseRdb) Parse() error {
+	// Whether or not err is empty, should close data channel.
+	exit := make(chan struct{}, 1)
+	defer close(exit)
 	go func() {
 		for {
 			select {
-			case v := <-r.data:
-				//case <-r.data:
-				fmt.Println(v)
-			case <-r.exit:
-				break
+			case v, ok := <-r.data:
+				fmt.Println(v, ok, 123)
+			//case <-r.data:
+
+			case <-exit:
+				return
 			}
 		}
 	}()
@@ -123,7 +126,6 @@ func (r *ParseRdb) Parse() error {
 	}
 
 	var lruIdle, lfuIdle, expire int64
-	//var expire uint64
 	var hasSelectDb bool
 	for {
 		// Begin analyze
@@ -134,7 +136,7 @@ func (r *ParseRdb) Parse() error {
 		if t == FlagOpcodeIdle {
 			qword, _, err := r.loadLen()
 			if err != nil {
-				return err
+				break
 			}
 			lruIdle = int64(qword)
 			r.output.LRU(lruIdle)
@@ -142,7 +144,7 @@ func (r *ParseRdb) Parse() error {
 		} else if t == FlagOpcodeFreq {
 			b, err := r.handler.ReadByte()
 			if err != nil {
-				return err
+				break
 			}
 			lfuIdle = int64(b)
 			r.output.LFU(lfuIdle)
@@ -150,36 +152,42 @@ func (r *ParseRdb) Parse() error {
 		} else if t == FlagOpcodeAux {
 			key, err := r.loadString()
 			if err != nil {
-				return errors.New("Parse Aux key failed: " + err.Error())
+				err = errors.New("Parse Aux key failed: " + err.Error())
+				break
 			}
 			val, err := r.loadString()
 			if err != nil {
-				return errors.New("Parse Aux value failed: " + err.Error())
+				err = errors.New("Parse Aux value failed: " + err.Error())
+				break
 			}
 			r.output.AuxField(key, val)
 			continue
 		} else if t == FlagOpcodeResizeDB {
 			dbSize, _, err := r.loadLen()
 			if err != nil {
-				return errors.New("Parse ResizeDB size failed: " + err.Error())
+				err = errors.New("Parse ResizeDB size failed: " + err.Error())
+				break
 			}
 			expiresSize, _, err := r.loadLen()
 			if err != nil {
-				return errors.New("Parse ResizeDB size failed: " + err.Error())
+				err = errors.New("Parse ResizeDB size failed: " + err.Error())
+				break
 			}
 			r.output.ResizeDB(dbSize, expiresSize)
 			continue
 		} else if t == FlagOpcodeExpireTimeMs {
 			_, err := io.ReadFull(r.handler, buff)
 			if err != nil {
-				return errors.New("Parse ExpireTime_ms failed: " + err.Error())
+				err = errors.New("Parse ExpireTime_ms failed: " + err.Error())
+				break
 			}
 			expire = int64(binary.LittleEndian.Uint64(buff))
 			continue
 		} else if t == FlagOpcodeExpireTime {
 			_, err := io.ReadFull(r.handler, buff)
 			if err != nil {
-				return errors.New("Parse ExpireTime failed: " + err.Error())
+				err = errors.New("Parse ExpireTime failed: " + err.Error())
+				break
 			}
 			expire = int64(binary.LittleEndian.Uint64(buff)) * 1000
 			continue
@@ -189,21 +197,22 @@ func (r *ParseRdb) Parse() error {
 			}
 			dbid, _, err := r.loadLen()
 			if err != nil {
-				return err
+				break
 			}
 			r.output.SelectDb(int(dbid))
 			continue
 		} else if t == FlagOpcodeEOF {
 			// TODO rdb checksum
-			return nil
+			err = nil
+			break
 		} else {
 			key, err := r.loadString()
 			if err != nil {
-				return err
+				break
 			}
 			// load redisObject
 			if err := r.loadObject(key, t, expire); err != nil {
-				return err
+				break
 			}
 		}
 		lfuIdle, lruIdle, expire = -1, -1, 0
@@ -212,7 +221,6 @@ func (r *ParseRdb) Parse() error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -247,83 +255,19 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 			return err
 		}
 	} else if t == TypeSet {
-		//length, _, err := r.loadLen()
-		//if err != nil {
-		//	return err
-		//}
-		//setCollect := make([][]byte, length)
-		//for i := uint64(0); i < length; i++ {
-		//	member, err := r.loadString()
-		//	if err != nil {
-		//		return err
-		//	}
-		//	setCollect = append(setCollect, member)
-		//}
-		//r.output.SAdd(key, expire, setCollect...)
 		if err := r.readSet(keyObj); err != nil {
 			return err
 		}
 	} else if t == TypeZset || t == TypeZset2 {
-		//length, _, err := r.loadLen()
-		//if err != nil {
-		//	return err
-		//}
-		//for i := uint64(0); i < length; i++ {
-		//	member, err := r.loadString()
-		//	if err != nil {
-		//		return err
-		//	}
-		//	var score float64
-		//	if t == Type_ZSET_2 {
-		//		score, err = r.loadBinaryFloat()
-		//		if err != nil {
-		//			return err
-		//		}
-		//		r.output.ZSet(key, member, score)
-		//	} else {
-		//		score, err = r.loadFloat()
-		//		if err != nil {
-		//			return err
-		//		}
-		//		r.output.ZSet(key, member, score)
-		//	}
-		//}
 		if err := r.readZSet(keyObj, t); err != nil {
 			return err
 		}
 	} else if t == TypeHash {
-		//length, _, err := r.loadLen()
-		//if err != nil {
-		//	return err
-		//}
-		//for i := uint64(0); i < length; i++ {
-		//	field, err := r.loadString()
-		//	if err != nil {
-		//		return err
-		//	}
-		//	value, err := r.loadString()
-		//	if err != nil {
-		//		return err
-		//	}
-		//	r.output.HSet(key, field, value, expire)
-		//}
 		keyObj := NewKeyObject(key, expire)
 		if err := r.readHashMap(keyObj); err != nil {
 			return err
 		}
 	} else if t == TypeListQuickList { // quicklist + ziplist to realize linked list
-		//length, _, err := r.loadLen()
-		//if err != nil {
-		//	return err
-		//}
-		//
-		//for i := uint64(0); i < length; i++ {
-		//	listItems, err := r.loadZipList()
-		//	if err != nil {
-		//		return err
-		//	}
-		//	r.output.List(key, expire, listItems...)
-		//}
 		if err := r.readListWithQuickList(keyObj); err != nil {
 			return err
 		}
@@ -331,13 +275,15 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.readHashMapWithZipmap(keyObj); err != nil {
 			return err
 		}
-		//return r.loadZipMap()
 	} else if t == TypeListZipList {
 		if err := r.readListWithZipList(keyObj); err != nil {
 			return err
 		}
-		//_, err := r.loadZipList()
-		//return err
+		//list, err := r.readListWithZipList(keyObj)
+		//if err != nil {
+		//	return err
+		//}
+		//r.data <- list
 	} else if t == TypeSetIntSet {
 		if err := r.readIntSet(keyObj); err != nil {
 			return err
@@ -347,12 +293,10 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.readZipListSortSet(keyObj); err != nil {
 			return err
 		}
-		//return r.loadZiplistZset(key, expire)
 	} else if t == TypeHashZipList {
 		if err := r.readHashMapZiplist(keyObj); err != nil {
 			return err
 		}
-		//return r.loadZiplistHash(key, expire)
 	} else if t == TypeStreamListPacks {
 		if err := r.loadStreamListPack(); err != nil {
 			return err
