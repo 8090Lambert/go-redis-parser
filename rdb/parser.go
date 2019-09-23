@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/8090Lambert/go-redis-parser/generator"
@@ -110,9 +109,9 @@ func (r *ParseRdb) Parse() error {
 	go func() {
 		for {
 			select {
-			//case v := <-r.data:
-			case <-r.data:
-			//fmt.Println(v)
+			case v := <-r.data:
+				//case <-r.data:
+				fmt.Println(v)
 			case <-r.exit:
 				break
 			}
@@ -355,9 +354,9 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		}
 		//return r.loadZiplistHash(key, expire)
 	} else if t == TypeStreamListPacks {
-		_, err := r.loadStreamListPack()
-		//fmt.Println(stream)
-		return err
+		if err := r.loadStreamListPack(); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -479,228 +478,6 @@ func (r *ParseRdb) loadBinaryFloat() (float64, error) {
 	}
 	bits := binary.LittleEndian.Uint64(buff)
 	return math.Float64frombits(bits), nil
-}
-
-func (r *ParseRdb) loadZipMap() error {
-	zipmap, err := r.loadString()
-	if err != nil {
-		return err
-	}
-	buf := newStream(zipmap)
-	blen, err := buf.ReadByte()
-	if err != nil {
-		return err
-	}
-
-	length := int(blen)
-	if blen > 254 {
-		length, err = countZipmapItems(buf)
-		if err != nil {
-			return err
-		}
-		length /= 2
-	}
-
-	for i := 0; i < length; i++ {
-		field, err := loadZipmapItem(buf, false)
-		if err != nil {
-			return err
-		}
-		value, err := loadZipmapItem(buf, true)
-		if err != nil {
-			return err
-		}
-		r.output.HSet([]byte("test"), field, value, 123)
-	}
-	return nil
-}
-
-func (r *ParseRdb) loadStreamListPack() (map[string]interface{}, error) {
-	// stream entry
-	entries, err := r.loadStreamEntry()
-	if err != nil {
-		return nil, nil
-	}
-
-	length, _, _ := r.loadLen()
-	ms, _, _ := r.loadLen()
-	seq, _, _ := r.loadLen()
-	lastId := concatStreamId(strconv.FormatUint(ms, 10), strconv.FormatUint(seq, 10))
-	//lastId := concatStreamId([]byte(strconv.Itoa(int(msi64))), []byte(strconv.Itoa(int(seqi64))))
-	stream := map[string]interface{}{"last_id": lastId, "length": strconv.Itoa(int(length))}
-
-	//stream group
-	groups, err := r.loadStreamGroup()
-
-	entriesBytes, _ := json.Marshal(entries)
-	groupBytes, _ := json.Marshal(groups)
-	stream["entries"] = string(entriesBytes)
-	stream["groups"] = string(groupBytes)
-
-	return stream, nil
-}
-
-func (r *ParseRdb) loadStreamEntry() (map[string]interface{}, error) {
-	entryLength, _, err := r.loadLen()
-	if err != nil {
-		return nil, err
-	}
-
-	entries := make(map[string]interface{}, entryLength)
-	for i := uint64(0); i < entryLength; i++ {
-		streamAuxBytes, err := r.loadString()
-		if err != nil {
-			return nil, err
-		}
-		header := newStream(streamAuxBytes)
-		msBytes, err := header.Slice(8) // ms
-		if err != nil {
-			return nil, err
-		}
-		seqBytes, err := header.Slice(8) // seq
-		if err != nil {
-			return nil, err
-		}
-		streamId := StreamId{Ms: binary.BigEndian.Uint64(msBytes), Sequence: binary.BigEndian.Uint64(seqBytes)}
-		messageId := streamId.String() //concatStreamId(strconv.FormatUint(binary.BigEndian.Uint64(msBytes), 10), strconv.FormatUint(binary.BigEndian.Uint64(seqBytes), 10))
-
-		headerBytes, err := r.loadString()
-		lp := newStream(headerBytes)
-		// Skip the header.
-		// 4b total-bytes + 2b num-elements
-		lp.Seek(6, 1)
-
-		entry, err := loadStreamItem(lp, streamId)
-		if err != nil {
-			return nil, err
-		}
-		entries[messageId] = entry
-	}
-
-	return entries, nil
-}
-
-func (r *ParseRdb) loadStreamGroup() ([]StreamGroup, error) {
-	/*Redis group, struct is this
-	typedef struct streamCG {
-	 	streamID last_id
-	     rax *pel
-			rax *consumers;
-	}*/
-	groupCount, _, err := r.loadLen()
-	if err != nil {
-		return nil, err
-	}
-
-	//groups := make([]map[string]interface{}, 0, groupCount)
-	groups := make([]StreamGroup, 0, groupCount)
-	for i := uint64(0); i < groupCount; i++ {
-		gName, err := r.loadString()
-		if err != nil {
-			return nil, err
-		}
-		ms, _, _ := r.loadLen()
-		seq, _, _ := r.loadLen()
-		// LastId
-		//groupLastId := concatStreamId(strconv.FormatUint(ms, 10), strconv.FormatUint(seq, 10))
-		//groupLastid := concatStreamId([]byte(strconv.FormatUint(ms, 10)), []byte(strconv.FormatUint(seq, 10)))
-		//groupItem := map[string]interface{}{
-		//	"group_name": string(gName),
-		//	"last_id":    groupLastId,
-		//}
-		lastId := StreamId{Ms: ms, Sequence: seq}
-		group := StreamGroup{Name: string(gName), LastId: lastId.String()}
-
-		// Global PendingEntryList
-		pel, _, _ := r.loadLen()
-		groupPendingEntries := make(map[string]interface{}, pel)
-		for i := uint64(0); i < pel; i++ {
-			io.ReadFull(r.handler, buff)
-			msBytes := buff
-			io.ReadFull(r.handler, buff)
-			seqBytes := buff
-			rawId := concatStreamId(strconv.FormatUint(binary.BigEndian.Uint64(msBytes), 10), strconv.FormatUint(binary.BigEndian.Uint64(seqBytes), 10))
-			//rawId := concatStreamId(msBytes, seqBytes)
-			io.ReadFull(r.handler, buff)
-			deliveryTime := uint64(binary.LittleEndian.Uint64(buff))
-			deliveryCount, _, _ := r.loadLen()
-
-			// This pending message not acknowledged, it will in consumer group
-			groupPendingEntries[rawId] = StreamNACK{DeliveryTime: deliveryTime, DeliveryCount: deliveryCount}
-			//groupPendingEntries[rawId] = map[string]string{"delivery_time": strconv.Itoa(int(deliveryTime)), "delivery_count": strconv.Itoa(int(deliveryCount))}
-		}
-
-		// Consumer
-		consumerCount, _, _ := r.loadLen()
-		//consumers := make([]map[string]interface{}, 0, consumerCount)
-		consumers := make([]StreamConsumer, 0, consumerCount)
-		for i := uint64(0); i < consumerCount; i++ {
-			cName, err := r.loadString()
-			if err != nil {
-				return nil, err
-			}
-			io.ReadFull(r.handler, buff)
-			seenTime := uint64(binary.LittleEndian.Uint64(buff))
-			//consumerItem := map[string]interface{}{
-			//	"consumer_name": string(cName),
-			//	"seen_time":     strconv.Itoa(int(seenTime)),
-			//}
-			consumer := StreamConsumer{SeenTime: seenTime, Name: string(cName)}
-
-			// Consumer PendingEntryList
-			pel, _, _ := r.loadLen()
-			consumersPendingEntries := make(map[string]interface{}, pel)
-			for i := uint64(0); i < pel; i++ {
-				io.ReadFull(r.handler, buff)
-				msBytes := buff
-				io.ReadFull(r.handler, buff)
-				seqBytes := buff
-				rawId := concatStreamId(strconv.FormatUint(binary.BigEndian.Uint64(msBytes), 10), strconv.FormatUint(binary.BigEndian.Uint64(seqBytes), 10))
-				//rawId := concatStreamId(msBytes, seqBytes)
-
-				// NoAck pending message
-				if _, ok := groupPendingEntries[rawId].(StreamNACK); !ok {
-					return nil, errors.New("NoACK pending message type unknown")
-				}
-				streamNoAckEntry := groupPendingEntries[rawId].(StreamNACK)
-				streamNoAckEntry.Consumer = consumer
-				consumersPendingEntries[rawId] = streamNoAckEntry
-
-				//itemBytes, _ := json.Marshal(consumerItem)
-				//groupPendingEntries[rawId]["consumer"] = string(itemBytes)
-				//entryString, _ := json.Marshal(groupPendingEntries[rawId])
-			}
-			//pendingEntryString, _ := json.Marshal(consumersPendingEntries)
-			//consumerItem["pendings"] = string(pendingEntryString)
-			//consumers = append(consumers, consumerItem)
-			consumer.PendingEntryList = consumersPendingEntries
-			consumers = append(consumers, consumer)
-		}
-
-		//gpendingString, _ := json.Marshal(groupPendingEntries)
-		//groupItem["pendings"] = groupPendingEntries
-		//consumersStr, _ := json.Marshal(consumers)
-		//groupItem["consumers"] = consumers
-		//groups = append(groups, groupItem)
-		group.PendingEntryList = groupPendingEntries
-		group.Consumers = consumers
-		groups = append(groups, group)
-	}
-
-	return groups, nil
-}
-
-func (r *ParseRdb) loadEOF(version int) (checkSum []byte, err error) {
-	if version >= 5 {
-		_, err = io.ReadFull(r.handler, buff)
-		if err != nil {
-			return checkSum, errors.New("Parse Check_sum failed: " + err.Error())
-		}
-		//checkSum = uint64(binary.LittleEndian.Uint64(buff))
-		checkSum = buff
-		return
-	}
-	return
 }
 
 func (r *ParseRdb) loadLZF() (res []byte, err error) {

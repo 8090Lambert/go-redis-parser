@@ -69,7 +69,7 @@ func (r *ParseRdb) loadZipList() ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	buf := newStream(b)
+	buf := newInput(b)
 	length, err := loadZiplistLength(buf)
 	if err != nil {
 		return nil, err

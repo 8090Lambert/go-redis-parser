@@ -37,7 +37,7 @@ func lzfDecompress(in []byte, inLen, outLen int) []byte {
 	return out
 }
 
-func loadZipmapItem(buf *stream, readFree bool) ([]byte, error) {
+func loadZipmapItem(buf *input, readFree bool) ([]byte, error) {
 	length, free, err := loadZipmapItemLength(buf, readFree)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func loadZipmapItem(buf *stream, readFree bool) ([]byte, error) {
 	return value, err
 }
 
-func countZipmapItems(buf *stream) (int, error) {
+func countZipmapItems(buf *input) (int, error) {
 	n := 0
 	for {
 		strLen, free, err := loadZipmapItemLength(buf, n%2 != 0)
@@ -73,7 +73,7 @@ func countZipmapItems(buf *stream) (int, error) {
 	return n, err
 }
 
-func loadZipmapItemLength(buf *stream, readFree bool) (int, int, error) {
+func loadZipmapItemLength(buf *input, readFree bool) (int, int, error) {
 	b, err := buf.ReadByte()
 	if err != nil {
 		return 0, 0, err
@@ -98,7 +98,7 @@ func loadZipmapItemLength(buf *stream, readFree bool) (int, int, error) {
 	return int(b), int(free), err
 }
 
-func loadZiplistLength(buf *stream) (int64, error) {
+func loadZiplistLength(buf *input) (int64, error) {
 	buf.Seek(8, 0)
 	lenBytes, err := buf.Slice(2)
 	if err != nil {
@@ -107,7 +107,7 @@ func loadZiplistLength(buf *stream) (int64, error) {
 	return int64(binary.LittleEndian.Uint16(lenBytes)), nil
 }
 
-func loadZiplistEntry(buf *stream) ([]byte, error) {
+func loadZiplistEntry(buf *input) ([]byte, error) {
 	prevLen, err := buf.ReadByte()
 	if err != nil {
 		return nil, err

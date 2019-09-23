@@ -49,7 +49,7 @@ func (r *ParseRdb) readZipListSortSet(key KeyObject) error {
 	if err != nil {
 		return err
 	}
-	buf := newStream(b)
+	buf := newInput(b)
 	cardinality, err := loadZiplistLength(buf)
 	if err != nil {
 		return err

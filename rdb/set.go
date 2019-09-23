@@ -37,7 +37,7 @@ func (r *ParseRdb) readIntSet(key KeyObject) error {
 	if err != nil {
 		return err
 	}
-	buf := newStream(b)
+	buf := newInput(b)
 	sizeBytes, err := buf.Slice(4)
 	if err != nil {
 		return err
@@ -68,10 +68,7 @@ func (r *ParseRdb) readIntSet(key KeyObject) error {
 			intString = strconv.FormatInt(int64(int64(binary.LittleEndian.Uint64(intBytes))), 10)
 		}
 		set.Entries = append(set.Entries, ToString(intString))
-		//intSetItem = append(intSetItem, []byte(intString))
 	}
-	//r.output.SAdd(key, expire, intSetItem...)
-	//fmt.Println(set.String())
 	r.data <- set
 	return nil
 }

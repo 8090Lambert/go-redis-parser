@@ -45,7 +45,7 @@ func (r *ParseRdb) readHashMapWithZipmap(key KeyObject) error {
 	if err != nil {
 		return err
 	}
-	buf := newStream(zipmap)
+	buf := newInput(zipmap)
 	blen, err := buf.ReadByte()
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (r *ParseRdb) readHashMapZiplist(key KeyObject) error {
 	if err != nil {
 		return err
 	}
-	buf := newStream(b)
+	buf := newInput(b)
 	length, err := loadZiplistLength(buf)
 	if err != nil {
 		return err
