@@ -6,12 +6,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/8090Lambert/go-redis-parser/generator"
 	"github.com/8090Lambert/go-redis-parser/parse"
 	"io"
 	"math"
 	"os"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -91,8 +91,7 @@ var (
 
 type ParseRdb struct {
 	handler *bufio.Reader
-	output  generator.Putter
-	data    chan interface{}
+	d1      []string
 }
 
 func NewRDB(file string) parse.Parser {
@@ -101,25 +100,10 @@ func NewRDB(file string) parse.Parser {
 		panic(err.Error())
 	}
 
-	return &ParseRdb{handler: bufio.NewReader(handler), output: generator.Putter{}, data: make(chan interface{})}
+	return &ParseRdb{handler: bufio.NewReader(handler), d1: make([]string, 0)}
 }
 
 func (r *ParseRdb) Parse() error {
-	// Whether or not err is empty, should close data channel.
-	exit := make(chan struct{}, 1)
-	defer close(exit)
-	go func() {
-		for {
-			select {
-			case v, ok := <-r.data:
-				fmt.Println(v, ok, 123)
-			//case <-r.data:
-
-			case <-exit:
-				return
-			}
-		}
-	}()
 	_, err := r.layoutCheck()
 	if err != nil {
 		return err
@@ -127,19 +111,19 @@ func (r *ParseRdb) Parse() error {
 
 	var lruIdle, lfuIdle, expire int64
 	var hasSelectDb bool
+	var t byte // Object type
 	for {
 		// Begin analyze
-		t, err := r.handler.ReadByte()
+		t, err = r.handler.ReadByte()
 		if err != nil {
 			break
 		}
 		if t == FlagOpcodeIdle {
-			qword, _, err := r.loadLen()
+			b, _, err := r.loadLen()
 			if err != nil {
 				break
 			}
-			lruIdle = int64(qword)
-			r.output.LRU(lruIdle)
+			lruIdle = int64(b)
 			continue
 		} else if t == FlagOpcodeFreq {
 			b, err := r.handler.ReadByte()
@@ -147,9 +131,17 @@ func (r *ParseRdb) Parse() error {
 				break
 			}
 			lfuIdle = int64(b)
-			r.output.LFU(lfuIdle)
 			continue
 		} else if t == FlagOpcodeAux {
+			// RDB 7 版本之后引入
+			// redis-ver：版本号
+			// redis-bits：OS Arch
+			// ctime：RDB文件创建时间
+			// used-mem：使用内存大小
+			// repl-stream-db：在server.master客户端中选择的数据库
+			// repl-id：当前实例 replication ID
+			// repl-offset：当前实例复制的偏移量
+			// lua：lua脚本
 			key, err := r.loadString()
 			if err != nil {
 				err = errors.New("Parse Aux key failed: " + err.Error())
@@ -160,9 +152,13 @@ func (r *ParseRdb) Parse() error {
 				err = errors.New("Parse Aux value failed: " + err.Error())
 				break
 			}
-			r.output.AuxField(key, val)
+			r.d1 = append(r.d1, r.AuxFields(key, val))
 			continue
 		} else if t == FlagOpcodeResizeDB {
+			// RDB 7 版本之后引入，详见 https://github.com/antirez/redis/pull/5039/commits/5cd3c9529df93b7e726256e2de17985a57f00e7b
+			// 包含两个编码后的值，用于加速RDB的加载，避免在加载过程中额外的调整hash空间(resize)和rehash操作
+			// 1.数据库的哈希表大小
+			// 2.失效哈希表的大小
 			dbSize, _, err := r.loadLen()
 			if err != nil {
 				err = errors.New("Parse ResizeDB size failed: " + err.Error())
@@ -173,7 +169,7 @@ func (r *ParseRdb) Parse() error {
 				err = errors.New("Parse ResizeDB size failed: " + err.Error())
 				break
 			}
-			r.output.ResizeDB(dbSize, expiresSize)
+			r.d1 = append(r.d1, fmt.Sprintf("{ResizeDB: {dbsize: %d, expireSize: %d}}", dbSize, expiresSize))
 			continue
 		} else if t == FlagOpcodeExpireTimeMs {
 			_, err := io.ReadFull(r.handler, buff)
@@ -195,32 +191,35 @@ func (r *ParseRdb) Parse() error {
 			if hasSelectDb == true {
 				continue
 			}
-			dbid, _, err := r.loadLen()
+			dbindex, _, err := r.loadLen()
 			if err != nil {
 				break
 			}
-			r.output.SelectDb(int(dbid))
+			r.d1 = append(r.d1, fmt.Sprintf("{Select: %d}", dbindex))
+			hasSelectDb = false
 			continue
 		} else if t == FlagOpcodeEOF {
 			// TODO rdb checksum
 			err = nil
 			break
-		} else {
-			key, err := r.loadString()
-			if err != nil {
-				break
-			}
-			// load redisObject
-			if err := r.loadObject(key, t, expire); err != nil {
-				break
-			}
 		}
-		lfuIdle, lruIdle, expire = -1, -1, 0
+		// Read key
+		key, err := r.loadString()
+		if err != nil {
+			return err
+		}
+		fmt.Println(lruIdle, lfuIdle, string(key))
+		// Read value
+		if err := r.loadObject(key, t, expire); err != nil {
+			return err
+		}
+		lfuIdle, lruIdle, expire = -1, -1, -1
 	}
 
 	if err != nil {
-		return err
+		r.out()
 	}
+
 	return nil
 }
 
@@ -279,11 +278,6 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.readListWithZipList(keyObj); err != nil {
 			return err
 		}
-		//list, err := r.readListWithZipList(keyObj)
-		//if err != nil {
-		//	return err
-		//}
-		//r.data <- list
 	} else if t == TypeSetIntSet {
 		if err := r.readIntSet(keyObj); err != nil {
 			return err
@@ -298,7 +292,7 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 			return err
 		}
 	} else if t == TypeStreamListPacks {
-		if err := r.loadStreamListPack(); err != nil {
+		if err := r.loadStreamListPack(keyObj); err != nil {
 			return err
 		}
 	}
@@ -440,4 +434,17 @@ func (r *ParseRdb) loadLZF() (res []byte, err error) {
 	}
 	res = lzfDecompress(val, int(ilength), int(ulength))
 	return
+}
+
+func (r *ParseRdb) out() {
+	//fh, err := os.Create("./a.txt")
+	//if err != nil {
+	//	panic("When output, fh is wrong.")
+	//}
+	if len(r.d1) > 0 {
+		for _, val := range r.d1 {
+			//fh.WriteString(val + "\r\n")
+			fmt.Println(strings.Count(val, ""), val)
+		}
+	}
 }

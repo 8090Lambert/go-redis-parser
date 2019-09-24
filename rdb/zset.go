@@ -39,7 +39,7 @@ func (r *ParseRdb) readZSet(key KeyObject, t byte) error {
 		}
 		sortedSet.Entries = append(sortedSet.Entries, SortedSetEntry{Field: ToString(member), Score: score})
 	}
-	r.data <- sortedSet
+	r.d1 = append(r.d1, sortedSet.String())
 
 	return nil
 }
@@ -72,7 +72,7 @@ func (r *ParseRdb) readZipListSortSet(key KeyObject) error {
 		}
 		sortedSet.Entries = append(sortedSet.Entries, SortedSetEntry{Field: ToString(member), Score: score})
 	}
-	r.data <- sortedSet
+	r.d1 = append(r.d1, sortedSet.String())
 
 	return nil
 }

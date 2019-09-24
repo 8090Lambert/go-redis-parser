@@ -27,7 +27,7 @@ func (r *ParseRdb) readSet(key KeyObject) error {
 		}
 		set.Entries = append(set.Entries, ToString(member))
 	}
-	r.data <- set
+	r.d1 = append(r.d1, set.String())
 
 	return nil
 }
@@ -69,10 +69,10 @@ func (r *ParseRdb) readIntSet(key KeyObject) error {
 		}
 		set.Entries = append(set.Entries, ToString(intString))
 	}
-	r.data <- set
+	r.d1 = append(r.d1, set.String())
 	return nil
 }
 
 func (s Set) String() string {
-	return fmt.Sprintf("Set{Key: %s, Len: %d, Item: %s}", ToString(s.Key), s.Len, strings.Join(s.Entries, ","))
+	return fmt.Sprintf("{Set: {Key: %s, Len: %d, Item: %s}}", ToString(s.Key), s.Len, strings.Join(s.Entries, ","))
 }

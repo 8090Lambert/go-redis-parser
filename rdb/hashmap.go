@@ -23,7 +23,7 @@ func (r *ParseRdb) readHashMap(key KeyObject) error {
 	if err != nil {
 		return err
 	}
-	hashTable := &HashMap{Key: key, Len: length, Entry: make([]HashEntry, 0, length)}
+	hashTable := HashMap{Key: key, Len: length, Entry: make([]HashEntry, 0, length)}
 	for i := uint64(0); i < length; i++ {
 		field, err := r.loadString()
 		if err != nil {
@@ -35,7 +35,7 @@ func (r *ParseRdb) readHashMap(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	r.data <- hashTable
+	r.d1 = append(r.d1, hashTable.String())
 
 	return nil
 }
@@ -72,8 +72,8 @@ func (r *ParseRdb) readHashMapWithZipmap(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
+	r.d1 = append(r.d1, hashTable.String())
 
-	r.data <- hashTable
 	return nil
 }
 
@@ -101,7 +101,7 @@ func (r *ParseRdb) readHashMapZiplist(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	r.data <- hashTable
+	r.d1 = append(r.d1, hashTable.String())
 
 	return nil
 }

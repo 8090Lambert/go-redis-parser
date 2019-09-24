@@ -45,7 +45,7 @@ type StreamNACK struct {
 	DeliveryCount uint64         `json:"delivery_count"`
 }
 
-func (r *ParseRdb) loadStreamListPack() error {
+func (r *ParseRdb) loadStreamListPack(key KeyObject) error {
 	// Stream entry
 	entries, err := r.loadStreamEntry()
 	if err != nil {
@@ -65,8 +65,8 @@ func (r *ParseRdb) loadStreamListPack() error {
 	if len(groups) > 0 {
 		stream.Groups = groups
 	}
+	r.d1 = append(r.d1, stream.String())
 
-	r.data <- stream
 	return nil
 }
 

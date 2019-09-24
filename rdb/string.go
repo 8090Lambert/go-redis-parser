@@ -13,7 +13,7 @@ func (r *ParseRdb) readString(key KeyObject) error {
 		return err
 	}
 	valObject := NewStringObject(key, valBytes)
-	r.data <- valObject
+	r.d1 = append(r.d1, valObject.String())
 	return nil
 }
 
