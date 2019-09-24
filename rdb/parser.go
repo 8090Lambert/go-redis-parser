@@ -6,12 +6,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/command"
 	"github.com/8090Lambert/go-redis-parser/parse"
 	"io"
 	"math"
 	"os"
 	"strconv"
-	"strings"
 )
 
 const (
@@ -80,7 +80,12 @@ const (
 	REDIS      = "REDIS"
 	VersionMin = 1
 	VersionMax = 9
+
+	AuxType  fieldType = 0 // 辅助数据类型
+	DataType fieldType = 1 // 数据类型
 )
+
+type fieldType int
 
 var (
 	buff   = make([]byte, 8)
@@ -108,8 +113,8 @@ func (r *ParseRdb) Parse() error {
 	if err != nil {
 		return err
 	}
-
-	var lruIdle, lfuIdle, expire int64
+	//var lruIdle, lfuIdle int64
+	var expire int64
 	var hasSelectDb bool
 	var t byte // Object type
 	for {
@@ -119,18 +124,18 @@ func (r *ParseRdb) Parse() error {
 			break
 		}
 		if t == FlagOpcodeIdle {
-			b, _, err := r.loadLen()
-			if err != nil {
-				break
-			}
-			lruIdle = int64(b)
+			//b, _, err := r.loadLen()
+			//if err != nil {
+			//	break
+			//}
+			//lruIdle = int64(b)
 			continue
 		} else if t == FlagOpcodeFreq {
-			b, err := r.handler.ReadByte()
-			if err != nil {
-				break
-			}
-			lfuIdle = int64(b)
+			//b, err := r.handler.ReadByte()
+			//if err != nil {
+			//	break
+			//}
+			//lfuIdle = int64(b)
 			continue
 		} else if t == FlagOpcodeAux {
 			// RDB 7 版本之后引入
@@ -208,17 +213,18 @@ func (r *ParseRdb) Parse() error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(lruIdle, lfuIdle, string(key))
 		// Read value
 		if err := r.loadObject(key, t, expire); err != nil {
 			return err
 		}
-		lfuIdle, lruIdle, expire = -1, -1, -1
+		expire = -1
+		//lfuIdle, lruIdle = -1, -1
 	}
 
 	if err != nil {
-		r.out()
+		return err
 	}
+	r.output()
 
 	return nil
 }
@@ -436,15 +442,21 @@ func (r *ParseRdb) loadLZF() (res []byte, err error) {
 	return
 }
 
-func (r *ParseRdb) out() {
+func (r *ParseRdb) output() {
 	//fh, err := os.Create("./a.txt")
 	//if err != nil {
 	//	panic("When output, fh is wrong.")
 	//}
+	//fmt.Println(command.Output)
 	if len(r.d1) > 0 {
+		if command.GenFileType == "csv" {
+
+		} else {
+
+		}
 		for _, val := range r.d1 {
 			//fh.WriteString(val + "\r\n")
-			fmt.Println(strings.Count(val, ""), val)
+			fmt.Println(bytes.Count([]byte(val), []byte{}))
 		}
 	}
 }

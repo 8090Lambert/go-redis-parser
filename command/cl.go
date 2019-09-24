@@ -9,17 +9,20 @@ import (
 )
 
 var (
-	RdbFile     string
-	AofFile     string
 	Output      string
 	GenFileType string
 )
 
+var (
+	rdbFile string
+	aofFile string
+)
+
 func Start() {
 	flag.StringVar(&Output, "o", "", "set the output directory for gen-file. (default: current directory)\n")
-	flag.StringVar(&GenFileType, "type", "", "set the gen-file's type, support type: json、csv. (default: csv)\n")
-	flag.StringVar(&RdbFile, "rdb", "", "<rdb-file-name>. For example: ./dump.rdb\n")
-	flag.StringVar(&AofFile, "aof", "", "file.aof. For example: ./appendonly.aof\n")
+	flag.StringVar(&GenFileType, "type", "csv", "set the gen-file's type, support type: json、csv. (default: csv)\n")
+	flag.StringVar(&rdbFile, "rdb", "", "<rdb-file-name>. For example: ./dump.rdb\n")
+	flag.StringVar(&aofFile, "aof", "", "file.aof. For example: ./appendonly.aof\n")
 
 	flag.Parse()
 	flag.Usage = defaultUsage
@@ -27,10 +30,13 @@ func Start() {
 
 func Watch() (mod int, file string) {
 	Start()
-	if RdbFile != "" {
-		return constants.RDBMOD, RdbFile
-	} else if AofFile != "" {
-		return constants.AOFMOD, AofFile
+	if GenFileType != "csv" && GenFileType != "json" {
+		return
+	}
+	if rdbFile != "" {
+		return constants.RDBMOD, rdbFile
+	} else if aofFile != "" {
+		return constants.AOFMOD, aofFile
 	} else {
 		flag.Usage()
 		return constants.UNKNOWN, ""
