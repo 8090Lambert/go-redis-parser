@@ -1,6 +1,9 @@
 package rdb
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/8090Lambert/go-redis-parser/protocol"
+)
 
 type StringObject struct {
 	Key   KeyObject
@@ -23,4 +26,12 @@ func NewStringObject(key KeyObject, val interface{}) StringObject {
 
 func (s StringObject) String() string {
 	return fmt.Sprintf("{String: {Key: %s, Value:'%s'}}", ToString(s.Key), ToString(s.Value))
+}
+
+func (s StringObject) Type() protocol.DataType {
+	return protocol.String
+}
+
+func (s StringObject) ConcreteSize() uint64 {
+	return 1
 }

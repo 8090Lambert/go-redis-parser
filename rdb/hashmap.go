@@ -3,6 +3,7 @@ package rdb
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 )
 
 // Some of HashEntry manager.
@@ -104,6 +105,10 @@ func (r *ParseRdb) readHashMapZiplist(key KeyObject) error {
 	r.d1 = append(r.d1, hashTable.String())
 
 	return nil
+}
+
+func (hm HashMap) Type() protocol.DataType {
+	return protocol.Hash
 }
 
 func (hm HashMap) String() string {

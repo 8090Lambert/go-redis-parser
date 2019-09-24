@@ -3,6 +3,7 @@ package rdb
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"strconv"
 )
 
@@ -75,6 +76,10 @@ func (r *ParseRdb) readZipListSortSet(key KeyObject) error {
 	r.d1 = append(r.d1, sortedSet.String())
 
 	return nil
+}
+
+func (zs SortedSet) Type() protocol.DataType {
+	return protocol.SortedSet
 }
 
 func (zs SortedSet) String() string {

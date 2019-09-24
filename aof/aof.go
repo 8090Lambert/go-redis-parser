@@ -2,7 +2,7 @@ package aof
 
 import (
 	"fmt"
-	"github.com/8090Lambert/go-redis-parser/parse"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"os"
 )
 
@@ -10,7 +10,7 @@ type AOFParser struct {
 	handler *os.File
 }
 
-func NewAof(file string) parse.Parser {
+func NewAof(file string) protocol.Parser {
 	handler, err := os.Open(file)
 	if err != nil {
 		panic(err.Error())

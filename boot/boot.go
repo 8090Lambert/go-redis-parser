@@ -5,7 +5,7 @@ import (
 	"github.com/8090Lambert/go-redis-parser/aof"
 	"github.com/8090Lambert/go-redis-parser/command"
 	"github.com/8090Lambert/go-redis-parser/constants"
-	"github.com/8090Lambert/go-redis-parser/parse"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"github.com/8090Lambert/go-redis-parser/rdb"
 	"os"
 )
@@ -32,7 +32,7 @@ func Boot() {
 	}
 }
 
-type Factory func(file string) parse.Parser
+type Factory func(file string) protocol.Parser
 
 func NewParserFactory(mod int) Factory {
 	if mod == constants.RDBMOD {

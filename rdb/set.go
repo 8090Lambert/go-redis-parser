@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"strconv"
 	"strings"
 )
@@ -71,6 +72,10 @@ func (r *ParseRdb) readIntSet(key KeyObject) error {
 	}
 	r.d1 = append(r.d1, set.String())
 	return nil
+}
+
+func (s Set) Type() protocol.DataType {
+	return protocol.Set
 }
 
 func (s Set) String() string {

@@ -2,6 +2,7 @@ package rdb
 
 import (
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"time"
 )
 
@@ -23,6 +24,10 @@ func NewKeyObject(key interface{}, expire int64) KeyObject {
 // Whether the key has expired until now.
 func (k KeyObject) Expired() bool {
 	return k.Expire.Before(time.Now())
+}
+
+func (k KeyObject) Type() protocol.DataType {
+	return protocol.Key
 }
 
 func (k KeyObject) String() string {

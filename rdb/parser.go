@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/8090Lambert/go-redis-parser/command"
-	"github.com/8090Lambert/go-redis-parser/parse"
 	"io"
 	"math"
 	"os"
@@ -80,12 +79,7 @@ const (
 	REDIS      = "REDIS"
 	VersionMin = 1
 	VersionMax = 9
-
-	AuxType  fieldType = 0 // 辅助数据类型
-	DataType fieldType = 1 // 数据类型
 )
-
-type fieldType int
 
 var (
 	buff   = make([]byte, 8)
@@ -99,7 +93,7 @@ type ParseRdb struct {
 	d1      []string
 }
 
-func NewRDB(file string) parse.Parser {
+func NewRDB(file string) protocol.Parser {
 	handler, err := os.Open(file)
 	if err != nil {
 		panic(err.Error())

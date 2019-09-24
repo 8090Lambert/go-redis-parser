@@ -2,6 +2,7 @@ package rdb
 
 import (
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"strings"
 )
 
@@ -85,6 +86,10 @@ func (r *ParseRdb) loadZipList() ([][]byte, error) {
 	}
 
 	return items, nil
+}
+
+func (l ListObject) Type() protocol.DataType {
+	return protocol.List
 }
 
 func (l ListObject) String() string {

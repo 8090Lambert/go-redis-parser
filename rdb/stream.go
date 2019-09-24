@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"io"
 	"strconv"
 )
@@ -396,6 +397,10 @@ func (sd StreamId) BuildOn(ms, seq uint64) StreamId {
 	newMs := sd.Ms + ms
 	newSequence := sd.Sequence + seq
 	return StreamId{Ms: newMs, Sequence: newSequence}
+}
+
+func (rs RedisStream) Type() protocol.DataType {
+	return protocol.Stream
 }
 
 func (rs RedisStream) String() string {
