@@ -8,15 +8,15 @@ import (
 
 // Some of HashEntry manager.
 type HashMap struct {
-	Key   KeyObject
+	Field KeyObject
 	Len   uint64
 	Entry []HashEntry
 }
 
 // HashTable entry.
 type HashEntry struct {
-	Field string
-	Value string
+	Field string `json:"field"`
+	Value string `json:"value"`
 }
 
 func (r *ParseRdb) readHashMap(key KeyObject) error {
@@ -24,7 +24,7 @@ func (r *ParseRdb) readHashMap(key KeyObject) error {
 	if err != nil {
 		return err
 	}
-	hashTable := HashMap{Key: key, Len: length, Entry: make([]HashEntry, 0, length)}
+	hashTable := HashMap{Field: key, Len: length, Entry: make([]HashEntry, 0, length)}
 	for i := uint64(0); i < length; i++ {
 		field, err := r.loadString()
 		if err != nil {
@@ -36,7 +36,8 @@ func (r *ParseRdb) readHashMap(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	r.d1 = append(r.d1, hashTable.String())
+	//r.d1 = append(r.d1, hashTable.String())
+	r.d1 = append(r.d1, hashTable)
 
 	return nil
 }
@@ -61,7 +62,7 @@ func (r *ParseRdb) readHashMapWithZipmap(key KeyObject) error {
 		length /= 2
 	}
 
-	hashTable := HashMap{Key: key, Len: uint64(length), Entry: make([]HashEntry, 0, length)}
+	hashTable := HashMap{Field: key, Len: uint64(length), Entry: make([]HashEntry, 0, length)}
 	for i := 0; i < length; i++ {
 		field, err := loadZipmapItem(buf, false)
 		if err != nil {
@@ -73,7 +74,8 @@ func (r *ParseRdb) readHashMapWithZipmap(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	r.d1 = append(r.d1, hashTable.String())
+	//r.d1 = append(r.d1, hashTable.String())
+	r.d1 = append(r.d1, hashTable)
 
 	return nil
 }
@@ -90,7 +92,7 @@ func (r *ParseRdb) readHashMapZiplist(key KeyObject) error {
 	}
 	length /= 2
 
-	hashTable := HashMap{Key: key, Len: uint64(length), Entry: make([]HashEntry, 0, length)}
+	hashTable := HashMap{Field: key, Len: uint64(length), Entry: make([]HashEntry, 0, length)}
 	for i := int64(0); i < length; i++ {
 		field, err := loadZiplistEntry(buf)
 		if err != nil {
@@ -102,16 +104,34 @@ func (r *ParseRdb) readHashMapZiplist(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	r.d1 = append(r.d1, hashTable.String())
+	//r.d1 = append(r.d1, hashTable.String())
+	r.d1 = append(r.d1, hashTable)
 
 	return nil
 }
 
-func (hm HashMap) Type() protocol.DataType {
+func (hm HashMap) Type() string {
 	return protocol.Hash
 }
 
 func (hm HashMap) String() string {
+	return fmt.Sprintf("{HashMap: {Key: %s, Len: %d, Entries: %s}}", hm.Key(), hm.Len, hm.Value())
+}
+
+func (hm HashMap) Key() string {
+	return ToString(hm.Field)
+}
+
+func (hm HashMap) Value() string {
 	itemStr, _ := json.Marshal(hm.Entry)
-	return fmt.Sprintf("{HashMap: {Key: %s, Len: %d, Entries: %s}}", ToString(hm.Key), hm.Len, ToString(itemStr))
+	return ToString(itemStr)
+}
+
+// 计算 hash 结构 field + value 的大小
+func (hm HashMap) ConcreteSize() uint64 {
+	var kv string
+	for _, val := range hm.Entry {
+		kv += ToString(val.Field) + ToString(val.Value)
+	}
+	return uint64(len([]byte(kv)))
 }

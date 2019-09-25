@@ -11,6 +11,7 @@ import (
 )
 
 type RedisStream struct {
+	Field   KeyObject
 	Entries map[string]interface{} `json:"entries"`
 	Length  uint64                 `json:"length"`
 	LastId  StreamId               `json:"last_id"`
@@ -57,7 +58,7 @@ func (r *ParseRdb) loadStreamListPack(key KeyObject) error {
 	ms, _, _ := r.loadLen()
 	seq, _, _ := r.loadLen()
 	lastId := StreamId{Ms: ms, Sequence: seq}
-	stream := RedisStream{LastId: lastId, Length: length, Entries: nil, Groups: nil}
+	stream := RedisStream{Field: key, LastId: lastId, Length: length, Entries: nil, Groups: nil}
 	if len(entries) > 0 {
 		stream.Entries = entries
 	}
@@ -66,7 +67,8 @@ func (r *ParseRdb) loadStreamListPack(key KeyObject) error {
 	if len(groups) > 0 {
 		stream.Groups = groups
 	}
-	r.d1 = append(r.d1, stream.String())
+	//r.d1 = append(r.d1, stream.String())
+	r.d1 = append(r.d1, stream)
 
 	return nil
 }
@@ -399,11 +401,19 @@ func (sd StreamId) BuildOn(ms, seq uint64) StreamId {
 	return StreamId{Ms: newMs, Sequence: newSequence}
 }
 
-func (rs RedisStream) Type() protocol.DataType {
+func (rs RedisStream) Type() string {
 	return protocol.Stream
 }
 
 func (rs RedisStream) String() string {
+	return fmt.Sprintf("{Stream: {Field: %s, Value:%s}}", rs.Key(), rs.Value())
+}
+
+func (rs RedisStream) Key() string {
+	return ToString(rs.Field)
+}
+
+func (rs RedisStream) Value() string {
 	format := map[string]interface{}{"LastId": rs.LastId, "Length": rs.Length}
 	if len(rs.Entries) > 0 {
 		format["Entries"] = rs.Entries
@@ -411,11 +421,29 @@ func (rs RedisStream) String() string {
 	if len(rs.Groups) > 0 {
 		format["groups"] = rs.Groups
 	}
-
 	output, err := json.Marshal(format)
 	if err != nil {
 		return ""
 	}
 
-	return fmt.Sprintf("{Stream: %s}", string(output))
+	return string(output)
+}
+
+func (rs RedisStream) ConcreteSize() uint64 {
+	if len(rs.Entries) > 0 {
+		var size uint64
+		for _, item := range rs.Entries {
+			if entry, ok := item.(map[string]interface{}); ok {
+				for _, fields := range entry {
+					collect := fields.(map[string]interface{})["fields"]
+					for _, value := range collect.(map[string]interface{}) { // entry fields and values
+						size += uint64(len([]byte(ToString(value))))
+					}
+				}
+			}
+		}
+		return size
+	}
+
+	return 0
 }

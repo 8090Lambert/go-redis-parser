@@ -6,8 +6,8 @@ import (
 )
 
 type StringObject struct {
-	Key   KeyObject
-	Value interface{}
+	Field KeyObject
+	Val   interface{}
 }
 
 func (r *ParseRdb) readString(key KeyObject) error {
@@ -16,22 +16,32 @@ func (r *ParseRdb) readString(key KeyObject) error {
 		return err
 	}
 	valObject := NewStringObject(key, valBytes)
-	r.d1 = append(r.d1, valObject.String())
+	//r.d1 = append(r.d1, valObject.String())
+	r.d1 = append(r.d1, valObject)
 	return nil
 }
 
 func NewStringObject(key KeyObject, val interface{}) StringObject {
-	return StringObject{Key: key, Value: val}
+	return StringObject{Field: key, Val: val}
 }
 
 func (s StringObject) String() string {
-	return fmt.Sprintf("{String: {Key: %s, Value:'%s'}}", ToString(s.Key), ToString(s.Value))
+	return fmt.Sprintf("{String: {Key: %s, Value:'%s'}}", s.Key(), s.Value())
 }
 
-func (s StringObject) Type() protocol.DataType {
+func (s StringObject) Type() string {
 	return protocol.String
 }
 
+func (s StringObject) Key() string {
+	return ToString(s.Field)
+}
+
+func (s StringObject) Value() string {
+	return ToString(s.Val)
+}
+
+// String类型，计算对应value
 func (s StringObject) ConcreteSize() uint64 {
-	return 1
+	return uint64(len([]byte(s.Value())))
 }

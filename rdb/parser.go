@@ -4,13 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/8090Lambert/go-redis-parser/command"
+	"github.com/8090Lambert/go-redis-parser/protocol"
 	"io"
 	"math"
 	"os"
 	"strconv"
+	"sync"
 )
 
 const (
@@ -86,11 +90,13 @@ var (
 	PosInf = math.Inf(1)
 	NegInf = math.Inf(-1)
 	Nan    = math.NaN()
+	prfix  = "parser" // output file prefix
 )
 
 type ParseRdb struct {
 	handler *bufio.Reader
-	d1      []string
+	wg      sync.WaitGroup
+	d1      []interface{}
 }
 
 func NewRDB(file string) protocol.Parser {
@@ -99,18 +105,54 @@ func NewRDB(file string) protocol.Parser {
 		panic(err.Error())
 	}
 
-	return &ParseRdb{handler: bufio.NewReader(handler), d1: make([]string, 0)}
+	return &ParseRdb{handler: bufio.NewReader(handler), d1: make([]interface{}, 0)}
 }
 
 func (r *ParseRdb) Parse() error {
-	_, err := r.layoutCheck()
-	if err != nil {
+	if res, err := r.layoutCheck(); res == false || err != nil {
 		return err
 	}
+
+	if err := r.start(); err != nil {
+		return err
+	}
+
+	if len(r.d1) > 0 {
+		r.wg.Add(2)
+		go r.findBiggestKey()
+		go r.output()
+		r.wg.Wait()
+	}
+
+	return nil
+}
+
+// 9 bytes length include: 5 bytes "REDIS" and 4 bytes version in rdb.file
+func (r *ParseRdb) layoutCheck() (bool, error) {
+	header := make([]byte, 9)
+	_, err := io.ReadFull(r.handler, header)
+	if err != nil {
+		if err == io.EOF {
+			return false, errors.New("RDB file is empty")
+		}
+		return false, errors.New("Read RDB file failed, error: " + err.Error())
+	}
+
+	// Check "REDIS" string and version.
+	rdbVersion, err := strconv.Atoi(string(header[5:]))
+	if !bytes.Equal(header[0:5], []byte(REDIS)) || err != nil || (rdbVersion < VersionMin || rdbVersion > VersionMax) {
+		return false, errors.New("RDB file version is wrong")
+	}
+
+	return true, nil
+}
+
+func (r *ParseRdb) start() error {
 	//var lruIdle, lfuIdle int64
 	var expire int64
 	var hasSelectDb bool
 	var t byte // Object type
+	var err error
 	for {
 		// Begin analyze
 		t, err = r.handler.ReadByte()
@@ -118,18 +160,18 @@ func (r *ParseRdb) Parse() error {
 			break
 		}
 		if t == FlagOpcodeIdle {
-			//b, _, err := r.loadLen()
-			//if err != nil {
-			//	break
-			//}
-			//lruIdle = int64(b)
+			b, _, err := r.loadLen()
+			if err != nil {
+				break
+			}
+			_ = int64(b) // lruIdle
 			continue
 		} else if t == FlagOpcodeFreq {
-			//b, err := r.handler.ReadByte()
-			//if err != nil {
-			//	break
-			//}
-			//lfuIdle = int64(b)
+			b, err := r.handler.ReadByte()
+			if err != nil {
+				break
+			}
+			_ = int64(b) // lfuIdle
 			continue
 		} else if t == FlagOpcodeAux {
 			// RDB 7 版本之后引入
@@ -151,7 +193,7 @@ func (r *ParseRdb) Parse() error {
 				err = errors.New("Parse Aux value failed: " + err.Error())
 				break
 			}
-			r.d1 = append(r.d1, r.AuxFields(key, val))
+			r.d1 = append(r.d1, AuxFields(key, val))
 			continue
 		} else if t == FlagOpcodeResizeDB {
 			// RDB 7 版本之后引入，详见 https://github.com/antirez/redis/pull/5039/commits/5cd3c9529df93b7e726256e2de17985a57f00e7b
@@ -168,7 +210,7 @@ func (r *ParseRdb) Parse() error {
 				err = errors.New("Parse ResizeDB size failed: " + err.Error())
 				break
 			}
-			r.d1 = append(r.d1, fmt.Sprintf("{ResizeDB: {dbsize: %d, expireSize: %d}}", dbSize, expiresSize))
+			r.d1 = append(r.d1, Resize(dbSize, expiresSize))
 			continue
 		} else if t == FlagOpcodeExpireTimeMs {
 			_, err := io.ReadFull(r.handler, buff)
@@ -194,7 +236,7 @@ func (r *ParseRdb) Parse() error {
 			if err != nil {
 				break
 			}
-			r.d1 = append(r.d1, fmt.Sprintf("{Select: %d}", dbindex))
+			r.d1 = append(r.d1, Selection(dbindex))
 			hasSelectDb = false
 			continue
 		} else if t == FlagOpcodeEOF {
@@ -215,32 +257,7 @@ func (r *ParseRdb) Parse() error {
 		//lfuIdle, lruIdle = -1, -1
 	}
 
-	if err != nil {
-		return err
-	}
-	r.output()
-
-	return nil
-}
-
-// 9 bytes length include: 5 bytes "REDIS" and 4 bytes version in rdb.file
-func (r *ParseRdb) layoutCheck() (bool, error) {
-	header := make([]byte, 9)
-	_, err := io.ReadFull(r.handler, header)
-	if err != nil {
-		if err == io.EOF {
-			return false, errors.New("RDB file is empty")
-		}
-		return false, errors.New("Read RDB file failed, error: " + err.Error())
-	}
-
-	// Check "REDIS" string and version.
-	rdbVersion, err := strconv.Atoi(string(header[5:]))
-	if !bytes.Equal(header[0:5], []byte(REDIS)) || err != nil || (rdbVersion < VersionMin || rdbVersion > VersionMax) {
-		return false, errors.New("RDB file version is wrong")
-	}
-
-	return true, nil
+	return err
 }
 
 func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
@@ -437,20 +454,50 @@ func (r *ParseRdb) loadLZF() (res []byte, err error) {
 }
 
 func (r *ParseRdb) output() {
-	//fh, err := os.Create("./a.txt")
-	//if err != nil {
-	//	panic("When output, fh is wrong.")
-	//}
-	//fmt.Println(command.Output)
-	if len(r.d1) > 0 {
-		if command.GenFileType == "csv" {
+	defer r.wg.Done()
+	if command.GenFileType == "json" {
+		r.writeJson()
+	} else {
+		r.writeJson()
+		//r.writeCsv()
+	}
+}
 
-		} else {
-
-		}
-		for _, val := range r.d1 {
-			//fh.WriteString(val + "\r\n")
-			fmt.Println(bytes.Count([]byte(val), []byte{}))
+func (r *ParseRdb) writeCsv() {
+	data := make([][]string, 0, len(r.d1)+1)
+	data = append(data, []string{"DataType", "Key", "Value", "Size(bytes)"})
+	for _, val := range r.d1 {
+		if entity, ok := val.(protocol.TypeObject); ok {
+			data = append(data, []string{entity.Type(), ToString(entity.Key()), ToString(entity.Value()), ToString(entity.ConcreteSize())})
+			//fmt.Println(key, entity.ConcreteSize())
 		}
 	}
+	f, err := os.OpenFile(prfix+".csv", os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		panic("Open file wrong.")
+	}
+	w := csv.NewWriter(f)
+	w.WriteAll(data)
+	w.Flush()
+}
+
+func (r *ParseRdb) writeJson() {
+	b, err := json.Marshal(r.d1)
+	if err != nil {
+		panic("Convert json wrong.")
+	}
+	f, err := os.OpenFile(prfix+".json", os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		panic("Open file wrong.")
+	}
+	w := bufio.NewWriter(f)
+	w.Write(b)
+	w.Flush()
+}
+
+func (r *ParseRdb) findBiggestKey() {
+	defer r.wg.Done()
+	//for _, val := range r.d1 {
+	//
+	//}
 }

@@ -8,7 +8,7 @@ import (
 )
 
 type SortedSet struct {
-	Key     KeyObject
+	Field   KeyObject
 	Len     uint64
 	Entries []SortedSetEntry
 }
@@ -23,7 +23,7 @@ func (r *ParseRdb) readZSet(key KeyObject, t byte) error {
 	if err != nil {
 		return err
 	}
-	sortedSet := SortedSet{Key: key, Len: length, Entries: make([]SortedSetEntry, 0, length)}
+	sortedSet := SortedSet{Field: key, Len: length, Entries: make([]SortedSetEntry, 0, length)}
 	for i := uint64(0); i < length; i++ {
 		member, err := r.loadString()
 		if err != nil {
@@ -40,7 +40,8 @@ func (r *ParseRdb) readZSet(key KeyObject, t byte) error {
 		}
 		sortedSet.Entries = append(sortedSet.Entries, SortedSetEntry{Field: ToString(member), Score: score})
 	}
-	r.d1 = append(r.d1, sortedSet.String())
+	//r.d1 = append(r.d1, sortedSet.String())
+	r.d1 = append(r.d1, sortedSet)
 
 	return nil
 }
@@ -57,7 +58,7 @@ func (r *ParseRdb) readZipListSortSet(key KeyObject) error {
 	}
 	cardinality /= 2
 
-	sortedSet := SortedSet{Key: key, Len: uint64(cardinality), Entries: make([]SortedSetEntry, 0, cardinality)}
+	sortedSet := SortedSet{Field: key, Len: uint64(cardinality), Entries: make([]SortedSetEntry, 0, cardinality)}
 	for i := int64(0); i < cardinality; i++ {
 		member, err := loadZiplistEntry(buf)
 		if err != nil {
@@ -73,16 +74,29 @@ func (r *ParseRdb) readZipListSortSet(key KeyObject) error {
 		}
 		sortedSet.Entries = append(sortedSet.Entries, SortedSetEntry{Field: ToString(member), Score: score})
 	}
-	r.d1 = append(r.d1, sortedSet.String())
+	//r.d1 = append(r.d1, sortedSet.String())
+	r.d1 = append(r.d1, sortedSet)
 
 	return nil
 }
 
-func (zs SortedSet) Type() protocol.DataType {
+func (zs SortedSet) Type() string {
 	return protocol.SortedSet
 }
 
 func (zs SortedSet) String() string {
+	return fmt.Sprintf("SortedSetMetadata{Key: %s, Len: %d, Entries: %s}", zs.Key(), zs.Len, zs.Value())
+}
+
+func (zs SortedSet) Key() string {
+	return ToString(zs.Field)
+}
+
+func (zs SortedSet) Value() string {
 	itemStr, _ := json.Marshal(zs.Entries)
-	return fmt.Sprintf("SortedSetMetadata{Key: %s, Len: %d, Entries: %s}", ToString(zs.Key), zs.Len, ToString(itemStr))
+	return ToString(itemStr)
+}
+
+func (zs SortedSet) ConcreteSize() uint64 {
+	return 1
 }
