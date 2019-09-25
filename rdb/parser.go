@@ -458,8 +458,7 @@ func (r *ParseRdb) output() {
 	if command.GenFileType == "json" {
 		r.writeJson()
 	} else {
-		r.writeJson()
-		//r.writeCsv()
+		r.writeCsv()
 	}
 }
 
@@ -497,7 +496,13 @@ func (r *ParseRdb) writeJson() {
 
 func (r *ParseRdb) findBiggestKey() {
 	defer r.wg.Done()
-	//for _, val := range r.d1 {
-	//
-	//}
+	types := map[string]int{protocol.String: 0, protocol.Hash: 1, protocol.List: 2, protocol.SortedSet: 3, protocol.Set: 4, protocol.Stream: 5}
+	sizes := make(map[string][]int, len(types))
+	biggest := map[string]string{protocol.String: "", protocol.Hash: "", protocol.List: "", protocol.SortedSet: "", protocol.Set: "", protocol.Stream: ""}
+	println("\n# Scanning the rdb file to find biggest keys\n")
+	for _, val := range r.d1 {
+		if entity, ok := val.(protocol.TypeObject); ok && entity.Type() != protocol.Aux && entity.Type() != protocol.SelectDB {
+
+		}
+	}
 }
