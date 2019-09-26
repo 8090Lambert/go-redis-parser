@@ -13,11 +13,12 @@ var (
 )
 
 type Parser interface {
-	Parse() error
+	Parse()
 }
 
 type TypeObject interface {
-	Value() string
+	Value() string        // value
+	ValueLen() uint64     // value length
 	Key() string          // Key
 	String() string       // Print string
 	Type() string         // Redis data type

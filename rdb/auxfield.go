@@ -6,25 +6,29 @@ import (
 )
 
 type AuxField struct {
-	Name  interface{}
 	Field interface{}
+	Val   interface{}
 }
 
 func AuxFields(key, val []byte) AuxField {
-	aux := AuxField{Name: key, Field: val}
+	aux := AuxField{Field: key, Val: val}
 	return aux
 }
 
 func (af AuxField) String() string {
-	return fmt.Sprintf("{Aux: {Key: %s, Value: %s}}", ToString(af.Name), ToString(af.Field))
+	return fmt.Sprintf("{Aux: {Key: %s, Value: %s}}", ToString(af.Field), ToString(af.Val))
 }
 
 func (af AuxField) Key() string {
-	return ToString(af.Name)
+	return ToString(af.Field)
 }
 
 func (af AuxField) Value() string {
-	return ToString(af.Field)
+	return ToString(af.Val)
+}
+
+func (af AuxField) ValueLen() uint64 {
+	return 0
 }
 
 func (af AuxField) Type() string {

@@ -107,6 +107,10 @@ func (l ListObject) Value() string {
 	return strings.Join(l.Entries, ",")
 }
 
+func (l ListObject) ValueLen() uint64 {
+	return uint64(len(l.Entries))
+}
+
 // list 结构计算所有item
 func (l ListObject) ConcreteSize() uint64 {
 	return uint64(len([]byte(l.Value())) - len(l.Entries) - 1) // 减去分隔符占用字节数

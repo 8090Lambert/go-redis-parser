@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-type AOFParser struct {
+type ParserAOF struct {
 	handler *os.File
 }
 
@@ -16,10 +16,9 @@ func NewAof(file string) protocol.Parser {
 		panic(err.Error())
 	}
 
-	return &AOFParser{handler: handler}
+	return &ParserAOF{handler: handler}
 }
 
-func (a *AOFParser) Parse() error {
+func (a *ParserAOF) Parse() {
 	fmt.Println("aof")
-	return nil
 }

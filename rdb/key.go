@@ -46,6 +46,10 @@ func (k KeyObject) Value() string {
 	return ToString(k.Field)
 }
 
+func (k KeyObject) ValueLen() uint64 {
+	return k.ConcreteSize()
+}
+
 // 暂时返回key的长度
 func (k KeyObject) ConcreteSize() uint64 {
 	return uint64(len([]byte(k.Value())))

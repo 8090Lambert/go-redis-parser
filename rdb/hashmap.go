@@ -123,8 +123,15 @@ func (hm HashMap) Key() string {
 }
 
 func (hm HashMap) Value() string {
-	itemStr, _ := json.Marshal(hm.Entry)
-	return ToString(itemStr)
+	if len(hm.Entry) > 0 {
+		itemStr, _ := json.Marshal(hm.Entry)
+		return ToString(itemStr)
+	}
+	return ""
+}
+
+func (hm HashMap) ValueLen() uint64 {
+	return uint64(len(hm.Entry) / 2)
 }
 
 // 计算 hash 结构 field + value 的大小

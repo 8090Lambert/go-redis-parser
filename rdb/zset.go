@@ -97,6 +97,10 @@ func (zs SortedSet) Value() string {
 	return ToString(itemStr)
 }
 
+func (zs SortedSet) ValueLen() uint64 {
+	return uint64(len(zs.Entries))
+}
+
 func (zs SortedSet) ConcreteSize() uint64 {
 	return 1
 }

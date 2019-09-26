@@ -41,6 +41,10 @@ func (s StringObject) Value() string {
 	return ToString(s.Val)
 }
 
+func (s StringObject) ValueLen() uint64 {
+	return s.ConcreteSize()
+}
+
 // String类型，计算对应value
 func (s StringObject) ConcreteSize() uint64 {
 	return uint64(len([]byte(s.Value())))

@@ -7,6 +7,7 @@ import (
 	"github.com/8090Lambert/go-redis-parser/constants"
 	"github.com/8090Lambert/go-redis-parser/protocol"
 	"github.com/8090Lambert/go-redis-parser/rdb"
+	"github.com/fatih/color"
 	"os"
 )
 
@@ -24,12 +25,15 @@ func Boot() {
 		return
 	}
 
-	parser := factory(file)
-	err := parser.Parse()
-	if err != nil {
-		fmt.Println("Parse failed: " + err.Error())
-		return
-	}
+	defer func() {
+		if err := recover(); err != nil {
+			if _, ok := err.(string); ok {
+				fmt.Println(color.RedString(fmt.Sprintf("Parse failed: %s", err)))
+			}
+		}
+	}()
+
+	factory(file).Parse()
 }
 
 type Factory func(file string) protocol.Parser

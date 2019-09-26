@@ -14,6 +14,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -26,7 +27,7 @@ const (
 	TypeHash
 	TypeZset2 /* ZSET version 2 with doubles stored in binary. */
 	TypeModule
-	TypeModule2
+	TypeModule2 // Module should import module entity, not support at present.
 	_
 	TypeHashZipMap
 	TypeListZipList
@@ -90,7 +91,7 @@ var (
 	PosInf = math.Inf(1)
 	NegInf = math.Inf(-1)
 	Nan    = math.NaN()
-	prfix  = "parser" // output file prefix
+	prefix = "parser" // output file prefix
 )
 
 type ParseRdb struct {
@@ -108,13 +109,12 @@ func NewRDB(file string) protocol.Parser {
 	return &ParseRdb{handler: bufio.NewReader(handler), d1: make([]interface{}, 0)}
 }
 
-func (r *ParseRdb) Parse() error {
+func (r *ParseRdb) Parse() {
 	if res, err := r.layoutCheck(); res == false || err != nil {
-		return err
+		panic(err.Error())
 	}
-
 	if err := r.start(); err != nil {
-		return err
+		panic(err.Error())
 	}
 
 	if len(r.d1) > 0 {
@@ -123,8 +123,6 @@ func (r *ParseRdb) Parse() error {
 		go r.output()
 		r.wg.Wait()
 	}
-
-	return nil
 }
 
 // 9 bytes length include: 5 bytes "REDIS" and 4 bytes version in rdb.file
@@ -312,6 +310,8 @@ func (r *ParseRdb) loadObject(key []byte, t byte, expire int64) error {
 		if err := r.loadStreamListPack(keyObj); err != nil {
 			return err
 		}
+	} else if t == TypeModule || t == TypeModule2 {
+		return errors.New("Module should import module entity, not support at present! ")
 	}
 
 	return nil
@@ -462,16 +462,24 @@ func (r *ParseRdb) output() {
 	}
 }
 
+func (r *ParseRdb) generateFileName(prefix, suffix string) string {
+	dir := command.Output
+	if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
+		os.Mkdir(dir, 0755)
+	}
+	fileName := strings.TrimRight(dir, "/") + "/" + prefix + suffix
+	return fileName
+}
+
 func (r *ParseRdb) writeCsv() {
 	data := make([][]string, 0, len(r.d1)+1)
 	data = append(data, []string{"DataType", "Key", "Value", "Size(bytes)"})
 	for _, val := range r.d1 {
 		if entity, ok := val.(protocol.TypeObject); ok {
 			data = append(data, []string{entity.Type(), ToString(entity.Key()), ToString(entity.Value()), ToString(entity.ConcreteSize())})
-			//fmt.Println(key, entity.ConcreteSize())
 		}
 	}
-	f, err := os.OpenFile(prfix+".csv", os.O_RDWR|os.O_CREATE, 0644)
+	f, err := os.OpenFile(r.generateFileName(prefix, ".csv"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		panic("Open file wrong.")
 	}
@@ -485,7 +493,7 @@ func (r *ParseRdb) writeJson() {
 	if err != nil {
 		panic("Convert json wrong.")
 	}
-	f, err := os.OpenFile(prfix+".json", os.O_RDWR|os.O_CREATE, 0644)
+	f, err := os.OpenFile(r.generateFileName(prefix, ".json"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		panic("Open file wrong.")
 	}
@@ -496,13 +504,48 @@ func (r *ParseRdb) writeJson() {
 
 func (r *ParseRdb) findBiggestKey() {
 	defer r.wg.Done()
-	types := map[string]int{protocol.String: 0, protocol.Hash: 1, protocol.List: 2, protocol.SortedSet: 3, protocol.Set: 4, protocol.Stream: 5}
-	sizes := make(map[string][]int, len(types))
-	biggest := map[string]string{protocol.String: "", protocol.Hash: "", protocol.List: "", protocol.SortedSet: "", protocol.Set: "", protocol.Stream: ""}
-	println("\n# Scanning the rdb file to find biggest keys\n")
+	var count, keySize uint64 // value's count and key's bytes
+	turns := []string{protocol.String, protocol.Hash, protocol.List, protocol.SortedSet, protocol.Set, protocol.Stream}
+	units := map[string]string{protocol.String: "bytes", protocol.Hash: "fields", protocol.List: "items", protocol.SortedSet: "members", protocol.Set: "members", protocol.Stream: "entries"}
+	gather := map[string][]uint64{protocol.String: make([]uint64, 2), protocol.Hash: make([]uint64, 2), protocol.List: make([]uint64, 2), protocol.SortedSet: make([]uint64, 2), protocol.Set: make([]uint64, 2), protocol.Stream: make([]uint64, 2)}
+	biggest := map[string][]string{protocol.String: make([]string, 0, 3), protocol.Hash: make([]string, 0, 3), protocol.List: make([]string, 0, 3), protocol.SortedSet: make([]string, 0, 3), protocol.Set: make([]string, 0, 3), protocol.Stream: make([]string, 0, 3)}
+	println("# Scanning the rdb file to find biggest keys\n")
 	for _, val := range r.d1 {
-		if entity, ok := val.(protocol.TypeObject); ok && entity.Type() != protocol.Aux && entity.Type() != protocol.SelectDB {
+		if entity, ok := val.(protocol.TypeObject); ok && !strings.EqualFold(entity.Type(), protocol.Aux) && !strings.EqualFold(entity.Type(), protocol.SelectDB) {
+			count += 1
+			keySize += uint64(len([]byte(entity.Key())))
+			// Gather all keys
+			gather[entity.Type()][0] += 1
+			gather[entity.Type()][1] += entity.ValueLen()
 
+			// Compare biggest key
+			if len(biggest[entity.Type()]) == 0 {
+				biggest[entity.Type()] = append(biggest[entity.Type()], entity.Key())
+				biggest[entity.Type()] = append(biggest[entity.Type()], strconv.FormatUint(entity.ValueLen(), 10))
+				biggest[entity.Type()] = append(biggest[entity.Type()], strconv.FormatUint(entity.ConcreteSize(), 10))
+			} else if strings.Compare(biggest[entity.Type()][2], strconv.FormatUint(entity.ConcreteSize(), 10)) == -1 {
+				biggest[entity.Type()][0] = entity.Key()
+				biggest[entity.Type()][1] = strconv.FormatUint(entity.ValueLen(), 10)
+				biggest[entity.Type()][2] = strconv.FormatUint(entity.ConcreteSize(), 10)
+			}
+		}
+	}
+	println("-------- summary -------\n")
+	println(fmt.Sprintf("Sampled %d keys in the keyspace!", count))
+	println(fmt.Sprintf("Total key length in bytes is %d\n", keySize))
+
+	// Biggest.
+	for _, val := range turns {
+		if len(biggest[val]) > 0 {
+			println(fmt.Sprintf("Biggest %6s found '%s' has %s %s", strings.ToLower(val), biggest[val][0], biggest[val][1], units[val]))
+		}
+	}
+	println()
+
+	// Gather
+	for _, val := range turns {
+		if len(gather[val]) > 0 {
+			println(fmt.Sprintf("%d %s with %d %s", gather[val][0], strings.ToLower(val), gather[val][1], units[val]))
 		}
 	}
 }

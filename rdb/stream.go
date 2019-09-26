@@ -429,6 +429,10 @@ func (rs RedisStream) Value() string {
 	return string(output)
 }
 
+func (rs RedisStream) ValueLen() uint64 {
+	return uint64(len(rs.Entries))
+}
+
 func (rs RedisStream) ConcreteSize() uint64 {
 	if len(rs.Entries) > 0 {
 		var size uint64

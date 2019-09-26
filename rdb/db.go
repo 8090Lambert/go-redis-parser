@@ -30,6 +30,10 @@ func (r ResizeDB) Value() string {
 	return fmt.Sprintf("{dbsize: %d, expireSize: %d}", r.DBSize, r.ExpireSize)
 }
 
+func (r ResizeDB) ValueLen() uint64 {
+	return 0
+}
+
 func (r ResizeDB) ConcreteSize() uint64 {
 	return 0
 }
@@ -56,6 +60,10 @@ func (s SelectionDB) Key() string {
 
 func (s SelectionDB) Value() string {
 	return ToString(s.Index)
+}
+
+func (s SelectionDB) ValueLen() uint64 {
+	return 0
 }
 
 func (s SelectionDB) ConcreteSize() uint64 {
