@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 const (
@@ -464,9 +465,19 @@ func (r *ParseRdb) output() {
 
 func (r *ParseRdb) generateFileName(prefix, suffix string) string {
 	dir := command.Output
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+
 	if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
 		os.Mkdir(dir, 0755)
 	}
+
+	// Check write permission.
+	if err := syscall.Access(dir, syscall.O_RDWR); err != nil {
+		panic(fmt.Sprintf("Path '%s' can not writeable! ", dir))
+	}
+
 	fileName := strings.TrimRight(dir, "/") + "/" + prefix + suffix
 	return fileName
 }

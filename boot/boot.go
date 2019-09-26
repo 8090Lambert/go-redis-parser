@@ -2,7 +2,6 @@ package boot
 
 import (
 	"fmt"
-	"github.com/8090Lambert/go-redis-parser/aof"
 	"github.com/8090Lambert/go-redis-parser/command"
 	"github.com/8090Lambert/go-redis-parser/constants"
 	"github.com/8090Lambert/go-redis-parser/protocol"
@@ -41,8 +40,6 @@ type Factory func(file string) protocol.Parser
 func NewParserFactory(mod int) Factory {
 	if mod == constants.RDBMOD {
 		return rdb.NewRDB
-	} else if mod == constants.AOFMOD {
-		return aof.NewAof
 	} else {
 		return nil
 	}

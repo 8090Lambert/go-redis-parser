@@ -19,10 +19,10 @@ var (
 )
 
 func Start() {
+	//flag.StringVar(&aofFile, "aof", "", "file.aof. For example: ./appendonly.aof\n")
+	flag.StringVar(&rdbFile, "rdb", "", "<rdb-file-name>. For example: ./dump.rdb\n")
 	flag.StringVar(&Output, "o", "", "set the output directory for gen-file. (default: current directory. parser.(json|csv) will be created)\n")
 	flag.StringVar(&GenFileType, "type", "csv", "set the gen-file's type, support type: json、csv. (default: csv)\n")
-	flag.StringVar(&rdbFile, "rdb", "", "<rdb-file-name>. For example: ./dump.rdb\n")
-	//flag.StringVar(&aofFile, "aof", "", "file.aof. For example: ./appendonly.aof\n")
 
 	flag.Parse()
 	flag.Usage = defaultUsage
