@@ -1,2 +1,2 @@
-# redis-rdb-parser
-Redis rdb解析器
+# go-redis-parser
+Redis 持久化文件解析
