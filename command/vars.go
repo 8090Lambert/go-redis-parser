@@ -15,6 +15,6 @@ var (
 Usage of:
 `
 	app         = `go-redis-parser`
-	version     = `1.0.0-alpha1`
+	version     = `alpha`
 	releaseTime = time.Date(2019, time.August, 24, 15, 24, 34, 0, time.Local).Format(`2006-01-02 15:04:05`)
 )
