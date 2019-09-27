@@ -113,5 +113,5 @@ func (l ListObject) ValueLen() uint64 {
 
 // list 结构计算所有item
 func (l ListObject) ConcreteSize() uint64 {
-	return uint64(len([]byte(l.Value())) - len(l.Entries) - 1) // 减去分隔符占用字节数
+	return uint64(len([]byte(l.Value())) - (len(l.Entries) - 1)) // 减去分隔符占用字节数
 }

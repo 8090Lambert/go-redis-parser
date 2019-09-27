@@ -3,6 +3,7 @@ package protocol
 var (
 	Aux       = "AuxField" // 辅助数据
 	SelectDB  = "SelectDB"
+	ResizeDB  = "ResizeDB"
 	Key       = "Key"
 	String    = "String"
 	Hash      = "Hash"

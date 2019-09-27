@@ -522,12 +522,14 @@ func (r *ParseRdb) findBiggestKey() {
 	biggest := map[string][]string{protocol.String: make([]string, 0, 3), protocol.Hash: make([]string, 0, 3), protocol.List: make([]string, 0, 3), protocol.SortedSet: make([]string, 0, 3), protocol.Set: make([]string, 0, 3), protocol.Stream: make([]string, 0, 3)}
 	println("# Scanning the rdb file to find biggest keys\n")
 	for _, val := range r.d1 {
-		if entity, ok := val.(protocol.TypeObject); ok && !strings.EqualFold(entity.Type(), protocol.Aux) && !strings.EqualFold(entity.Type(), protocol.SelectDB) {
+		if entity, ok := val.(protocol.TypeObject); ok && !strings.EqualFold(entity.Type(), protocol.Aux) && !strings.EqualFold(entity.Type(), protocol.SelectDB) && !strings.EqualFold(entity.Type(), protocol.ResizeDB) {
 			count += 1
 			keySize += uint64(len([]byte(entity.Key())))
-			// Gather all keys
-			gather[entity.Type()][0] += 1
-			gather[entity.Type()][1] += entity.ValueLen()
+			if _, ok := gather[entity.Type()]; ok {
+				// Gather all keys
+				gather[entity.Type()][0] += 1
+				gather[entity.Type()][1] += entity.ValueLen()
+			}
 
 			// Compare biggest key
 			if len(biggest[entity.Type()]) == 0 {

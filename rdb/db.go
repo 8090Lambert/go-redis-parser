@@ -27,7 +27,7 @@ func (r ResizeDB) Key() string {
 }
 
 func (r ResizeDB) Value() string {
-	return fmt.Sprintf("{dbsize: %d, expireSize: %d}", r.DBSize, r.ExpireSize)
+	return fmt.Sprintf("{DBSize: %d, ExpireSize: %d}", r.DBSize, r.ExpireSize)
 }
 
 func (r ResizeDB) ValueLen() uint64 {
@@ -39,7 +39,7 @@ func (r ResizeDB) ConcreteSize() uint64 {
 }
 
 func (r ResizeDB) Type() string {
-	return protocol.SelectDB
+	return protocol.ResizeDB
 }
 
 func Selection(index uint64) SelectionDB {

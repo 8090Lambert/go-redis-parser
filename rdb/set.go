@@ -98,5 +98,5 @@ func (s Set) ValueLen() uint64 {
 
 // Set 结构计算所有item
 func (s Set) ConcreteSize() uint64 {
-	return uint64(len([]byte(s.Value())) - len(s.Entries) - 1)
+	return uint64(len([]byte(s.Value())) - (len(s.Entries) - 1))
 }

@@ -102,5 +102,11 @@ func (zs SortedSet) ValueLen() uint64 {
 }
 
 func (zs SortedSet) ConcreteSize() uint64 {
-	return 1
+	var size uint64
+	if len(zs.Entries) > 0 {
+		for _, val := range zs.Entries {
+			size += uint64(len([]byte(ToString(val.Field))))
+		}
+	}
+	return size
 }

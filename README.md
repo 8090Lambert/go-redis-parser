@@ -67,7 +67,31 @@ $ go run main.go -rdb <dump.rdb> -o <gen-file folder> -type <gen-file type, json
 | String | s | a | 1 |
 | List | li | a,b | 2 |
 | Set | set | b,a | 2 |
-| Stream | stream | {"Entries":{"1569553992318-0"... | 20 |
-| Sortedset | zset | [{"Field":"a","Score":1},{"Field":"b","Score":2}] | 10 |
+| Stream | stream | {"Entries":{"1569553992318-0"... | 41 |
+| Sortedset | zset | [{"Field":"a","Score":1},{"Field":"b","Score":2}] | 2 |
 | Hash | h | [{"field":"a","value":"a"}] | 2 |
+
+### BigKeys outputs
+```
+# Scanning the rdb file to find biggest keys
+
+-------- summary -------
+
+Sampled 6 keys in the keyspace!
+Total key length in bytes is 17
+
+Biggest string found 's' has 1 bytes
+Biggest   hash found 'h' has 1 fields
+Biggest   list found 'li' has 2 items
+Biggest sortedset found 'zset' has 2 members
+Biggest    set found 'set' has 2 members
+Biggest stream found 'stream' has 3 entries
+
+1 string with 1 bytes
+1 hash with 1 fields
+1 list with 2 items
+1 sortedset with 2 members
+1 set with 2 members
+1 stream with 3 entries
+```
 

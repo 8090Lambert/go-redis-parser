@@ -131,7 +131,7 @@ func (hm HashMap) Value() string {
 }
 
 func (hm HashMap) ValueLen() uint64 {
-	return uint64(len(hm.Entry) / 2)
+	return uint64(len(hm.Entry))
 }
 
 // 计算 hash 结构 field + value 的大小

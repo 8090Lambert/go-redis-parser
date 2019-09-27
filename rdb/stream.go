@@ -14,7 +14,7 @@ type RedisStream struct {
 	Field   KeyObject
 	Entries map[string]interface{} `json:"entries"`
 	Length  uint64                 `json:"length"`
-	LastId  StreamId               `json:"last_id"`
+	LastId  StreamId               `json:"lastId"`
 	Groups  []StreamGroup          `json:"groups"`
 }
 
@@ -29,22 +29,22 @@ type StreamId struct {
 }
 
 type StreamGroup struct {
-	Name             string                 `json:"group_name"`
-	LastId           string                 `json:"last_id"`
+	Name             string                 `json:"groupName"`
+	LastId           string                 `json:"lastId"`
 	PendingEntryList map[string]interface{} `json:"pending"`
 	Consumers        []StreamConsumer       `json:"consumers"`
 }
 
 type StreamConsumer struct {
-	SeenTime         uint64                 `json:"seen_time"`
-	Name             string                 `json:"consumer_name"`
+	SeenTime         uint64                 `json:"seenTime"`
+	Name             string                 `json:"consumerName"`
 	PendingEntryList map[string]interface{} `json:"pending"`
 }
 
 type StreamNACK struct {
 	Consumer      StreamConsumer `json:"consumer"`
-	DeliveryTime  uint64         `json:"delivery_time"`
-	DeliveryCount uint64         `json:"delivery_count"`
+	DeliveryTime  uint64         `json:"deliveryTime"`
+	DeliveryCount uint64         `json:"deliveryCount"`
 }
 
 func (r *ParseRdb) loadStreamListPack(key KeyObject) error {
@@ -284,7 +284,7 @@ func loadStreamEntryItem(lp *input, stId StreamId) (entries map[string]interface
 			}
 			fields[string(fieldBytes)] = string(vBytes)
 		}
-		entries[messageId] = map[string]interface{}{"has_deleted": hasDelete, "fields": fields}
+		entries[messageId] = map[string]interface{}{"hasDeleted": hasDelete, "fields": fields}
 		loadStreamListPackEntry(lp)
 	}
 
@@ -430,7 +430,13 @@ func (rs RedisStream) Value() string {
 }
 
 func (rs RedisStream) ValueLen() uint64 {
-	return uint64(len(rs.Entries))
+	var length uint64
+	if len(rs.Entries) > 0 {
+		for _, item := range rs.Entries {
+			length = uint64(len(item.(map[string]interface{})))
+		}
+	}
+	return length
 }
 
 func (rs RedisStream) ConcreteSize() uint64 {
@@ -440,8 +446,8 @@ func (rs RedisStream) ConcreteSize() uint64 {
 			if entry, ok := item.(map[string]interface{}); ok {
 				for _, fields := range entry {
 					collect := fields.(map[string]interface{})["fields"]
-					for _, value := range collect.(map[string]interface{}) { // entry fields and values
-						size += uint64(len([]byte(ToString(value))))
+					for key, value := range collect.(map[string]interface{}) { // entry fields and values
+						size += uint64(len([]byte(ToString(key)))) + uint64(len([]byte(ToString(value))))
 					}
 				}
 			}
