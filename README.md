@@ -1,7 +1,9 @@
 <h1 align="left">go-redis-parser</h1>
-<img align="right" width="200px" src="https://raw.githubusercontent.com/8090Lambert/material/master/go-redis-parser.jpg">  
+<img align="right" width="130px" src="https://raw.githubusercontent.com/8090Lambert/material/master/go-redis-parser.jpg">  
 
-This is a parser in Golang. Its characteristics are: make full use of the coroutine language's coroutine, write at the same time as the file is written, more efficient analysis.  
+This is a parser in Golang. Its characteristics are: make full use of 
+the coroutine language's coroutine, write at the same time as the file 
+is written, more efficient analysis.  
    
 ```
  _____ ____        ____  _____ ____  _  ____        ____  ____  ____  ____  _____ ____
