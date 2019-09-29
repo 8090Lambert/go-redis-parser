@@ -1,6 +1,8 @@
-<h1 align="center"><a href="https://github.com/8090lambert/go-redis-parser">go-redis-parser</a></h1>
-:blue_book: A Faster parser for Redis's Data Persistence.
+<h1 align="left">go-redis-parser</h1>
+<img align="right" width="200px" src="https://raw.githubusercontent.com/8090Lambert/material/master/go-redis-parser.jpg">  
 
+This is a parser in Golang. Its characteristics are: make full use of the coroutine language's coroutine, write at the same time as the file is written, more efficient analysis.  
+   
 ```
  _____ ____        ____  _____ ____  _  ____        ____  ____  ____  ____  _____ ____
 /  __//  _ \      /  __\/  __//  _ \/ \/ ___\      /  __\/  _ \/  __\/ ___\/  __//  __\
@@ -23,8 +25,6 @@ Usage of:
 ```
 
 ### Feature
-
-#### DataType
 Supports Redis from 2.8 to 5.0, all data types except module. Including:
 - String
 - Hash
@@ -33,8 +33,8 @@ Supports Redis from 2.8 to 5.0, all data types except module. Including:
 - SortedSed
 - Stream
 
-#### Others
 In addition to exporting all key/values, it also looks for all types of `Bigkeys` (like `redis-cli --bigkeys`).
+
 
 ### Installation
 `go-redis-parser` is a standard package，you can use `git` or `go get` to install.
