@@ -28,8 +28,7 @@ func (r *ParseRdb) readSet(key KeyObject) error {
 		}
 		set.Entries = append(set.Entries, ToString(member))
 	}
-	//r.d1 = append(r.d1, set.String())
-	r.d1 = append(r.d1, set)
+	r.d2 <- set
 
 	return nil
 }
@@ -71,8 +70,7 @@ func (r *ParseRdb) readIntSet(key KeyObject) error {
 		}
 		set.Entries = append(set.Entries, ToString(intString))
 	}
-	//r.d1 = append(r.d1, set.String())
-	r.d1 = append(r.d1, set)
+	r.d2 <- set
 	return nil
 }
 

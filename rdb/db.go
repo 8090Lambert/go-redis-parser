@@ -14,8 +14,10 @@ type ResizeDB struct {
 	ExpireSize uint64
 }
 
-func Resize(dbSize, expireSize uint64) ResizeDB {
-	return ResizeDB{DBSize: dbSize, ExpireSize: expireSize}
+func (r *ParseRdb) Resize(dbSize, expireSize uint64) ResizeDB {
+	resize := ResizeDB{DBSize: dbSize, ExpireSize: expireSize}
+	r.d2 <- resize
+	return resize
 }
 
 func (r ResizeDB) String() string {
@@ -42,8 +44,10 @@ func (r ResizeDB) Type() string {
 	return protocol.ResizeDB
 }
 
-func Selection(index uint64) SelectionDB {
-	return SelectionDB{Index: index}
+func (r *ParseRdb) Selection(index uint64) SelectionDB {
+	selectDB := SelectionDB{Index: index}
+	r.d2 <- selectDB
+	return selectDB
 }
 
 func (s SelectionDB) Type() string {

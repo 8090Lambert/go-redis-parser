@@ -18,6 +18,7 @@ func (r *ParseRdb) readString(key KeyObject) error {
 	valObject := NewStringObject(key, valBytes)
 	//r.d1 = append(r.d1, valObject.String())
 	r.d1 = append(r.d1, valObject)
+	r.d2 <- valObject
 	return nil
 }
 

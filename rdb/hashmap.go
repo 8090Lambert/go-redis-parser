@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/8090Lambert/go-redis-parser/protocol"
+	"strings"
 )
 
 // Some of HashEntry manager.
@@ -36,9 +37,7 @@ func (r *ParseRdb) readHashMap(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	//r.d1 = append(r.d1, hashTable.String())
-	r.d1 = append(r.d1, hashTable)
-
+	r.d2 <- hashTable
 	return nil
 }
 
@@ -74,9 +73,7 @@ func (r *ParseRdb) readHashMapWithZipmap(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	//r.d1 = append(r.d1, hashTable.String())
-	r.d1 = append(r.d1, hashTable)
-
+	r.d2 <- hashTable
 	return nil
 }
 
@@ -104,9 +101,7 @@ func (r *ParseRdb) readHashMapZiplist(key KeyObject) error {
 		}
 		hashTable.Entry = append(hashTable.Entry, HashEntry{Field: ToString(field), Value: ToString(value)})
 	}
-	//r.d1 = append(r.d1, hashTable.String())
-	r.d1 = append(r.d1, hashTable)
-
+	r.d2 <- hashTable
 	return nil
 }
 
@@ -136,9 +131,10 @@ func (hm HashMap) ValueLen() uint64 {
 
 // 计算 hash 结构 field + value 的大小
 func (hm HashMap) ConcreteSize() uint64 {
-	var kv string
+	kv := make([]string, 0, len(hm.Entry))
 	for _, val := range hm.Entry {
-		kv += ToString(val.Field) + ToString(val.Value)
+		tmp := val
+		kv = append(kv, tmp.Field+tmp.Value)
 	}
-	return uint64(len([]byte(kv)))
+	return uint64(len(strings.Join(kv, "")))
 }

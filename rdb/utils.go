@@ -4,7 +4,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/8090Lambert/go-redis-parser/command"
+	"os"
 	"strconv"
+	"strings"
+	"syscall"
 )
 
 func lzfDecompress(in []byte, inLen, outLen int) []byte {
@@ -168,6 +172,25 @@ func loadZiplistEntry(buf *input) ([]byte, error) {
 	}
 
 	return nil, errors.New(fmt.Sprintf("rdb: unknown ziplist header byte: %d", header))
+}
+
+func generateFileName(prefix, suffix string) string {
+	dir := command.Output
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+
+	if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
+		os.Mkdir(dir, 0755)
+	}
+
+	// Check write permission.
+	if err := syscall.Access(dir, syscall.O_RDWR); err != nil {
+		panic(fmt.Sprintf("Path '%s' can not writeable! ", dir))
+	}
+
+	fileName := strings.TrimRight(dir, "/") + "/" + prefix + suffix
+	return fileName
 }
 
 func ToString(i interface{}) string {

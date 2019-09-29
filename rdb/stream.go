@@ -69,6 +69,7 @@ func (r *ParseRdb) loadStreamListPack(key KeyObject) error {
 	}
 	//r.d1 = append(r.d1, stream.String())
 	r.d1 = append(r.d1, stream)
+	r.d2 <- stream
 
 	return nil
 }

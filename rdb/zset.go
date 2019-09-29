@@ -42,7 +42,7 @@ func (r *ParseRdb) readZSet(key KeyObject, t byte) error {
 	}
 	//r.d1 = append(r.d1, sortedSet.String())
 	r.d1 = append(r.d1, sortedSet)
-
+	r.d2 <- sortedSet
 	return nil
 }
 
@@ -76,7 +76,7 @@ func (r *ParseRdb) readZipListSortSet(key KeyObject) error {
 	}
 	//r.d1 = append(r.d1, sortedSet.String())
 	r.d1 = append(r.d1, sortedSet)
-
+	r.d2 <- sortedSet
 	return nil
 }
 
@@ -85,7 +85,7 @@ func (zs SortedSet) Type() string {
 }
 
 func (zs SortedSet) String() string {
-	return fmt.Sprintf("SortedSetMetadata{Key: %s, Len: %d, Entries: %s}", zs.Key(), zs.Len, zs.Value())
+	return fmt.Sprintf("{SortedSet: {Key: %s, Len: %d, Entries: %s}}", zs.Key(), zs.Len, zs.Value())
 }
 
 func (zs SortedSet) Key() string {

@@ -25,8 +25,7 @@ func (r *ParseRdb) readList(key KeyObject) error {
 		}
 		listObj.Entries = append(listObj.Entries, ToString(val))
 	}
-	//r.d1 = append(r.d1, listObj.String())
-	r.d1 = append(r.d1, listObj)
+	r.d2 <- listObj
 
 	return nil
 }
@@ -46,8 +45,7 @@ func (r *ParseRdb) readListWithQuickList(key KeyObject) error {
 		for _, v := range listItems {
 			listObj.Entries = append(listObj.Entries, ToString(v))
 		}
-		//r.d1 = append(r.d1, listObj.String())
-		r.d1 = append(r.d1, listObj)
+		r.d2 <- listObj
 	}
 
 	return nil
@@ -62,8 +60,7 @@ func (r *ParseRdb) readListWithZipList(key KeyObject) error {
 	for _, v := range entries {
 		listObj.Entries = append(listObj.Entries, ToString(v))
 	}
-	//r.d1 = append(r.d1, listObj.String())
-	r.d1 = append(r.d1, listObj)
+	r.d2 <- listObj
 
 	return nil
 }

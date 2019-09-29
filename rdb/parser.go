@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/csv"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/8090Lambert/go-redis-parser/command"
@@ -16,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 )
 
 const (
@@ -93,12 +90,16 @@ var (
 	NegInf = math.Inf(-1)
 	Nan    = math.NaN()
 	prefix = "parser" // output file prefix
+	suffix = ".csv"
 )
 
 type ParseRdb struct {
 	handler *bufio.Reader
 	wg      sync.WaitGroup
 	d1      []interface{}
+	d2      chan protocol.TypeObject
+	quit    chan struct{}
+	writer  *WriterRDB
 }
 
 func NewRDB(file string) protocol.Parser {
@@ -107,23 +108,55 @@ func NewRDB(file string) protocol.Parser {
 		panic(err.Error())
 	}
 
-	return &ParseRdb{handler: bufio.NewReader(handler), d1: make([]interface{}, 0)}
+	if command.GenFileType == "json" {
+		suffix = ".json"
+	}
+	writer, err := os.OpenFile(generateFileName(prefix, suffix), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		panic(err.Error())
+	}
+	gather := map[string][]uint64{protocol.String: make([]uint64, 2), protocol.Hash: make([]uint64, 2), protocol.List: make([]uint64, 2), protocol.SortedSet: make([]uint64, 2), protocol.Set: make([]uint64, 2), protocol.Stream: make([]uint64, 2)}
+	biggest := map[string][]string{protocol.String: make([]string, 0, 3), protocol.Hash: make([]string, 0, 3), protocol.List: make([]string, 0, 3), protocol.SortedSet: make([]string, 0, 3), protocol.Set: make([]string, 0, 3), protocol.Stream: make([]string, 0, 3)}
+
+	return &ParseRdb{
+		handler: bufio.NewReader(handler),
+		d1:      make([]interface{}, 1),
+		d2:      make(chan protocol.TypeObject),
+		quit:    make(chan struct{}),
+		writer:  NewRDBWriter(writer, gather, biggest),
+	}
 }
 
 func (r *ParseRdb) Parse() {
+	r.listening()
 	if res, err := r.layoutCheck(); res == false || err != nil {
 		panic(err.Error())
 	}
 	if err := r.start(); err != nil {
 		panic(err.Error())
 	}
+	r.endListening()
+	r.flushWriter()
+}
 
-	if len(r.d1) > 0 {
-		r.wg.Add(2)
-		go r.findBiggestKey()
-		go r.output()
-		r.wg.Wait()
-	}
+func (r *ParseRdb) listening() {
+	r.wg.Add(1)
+	go func() {
+		for {
+			select {
+			case v := <-r.d2:
+				r.collect(v)
+			case <-r.quit:
+				r.wg.Done()
+				return
+			}
+		}
+	}()
+}
+
+func (r *ParseRdb) endListening() {
+	close(r.quit)
+	r.wg.Wait()
 }
 
 // 9 bytes length include: 5 bytes "REDIS" and 4 bytes version in rdb.file
@@ -192,7 +225,7 @@ func (r *ParseRdb) start() error {
 				err = errors.New("Parse Aux value failed: " + err.Error())
 				break
 			}
-			r.d1 = append(r.d1, AuxFields(key, val))
+			r.AuxFields(key, val)
 			continue
 		} else if t == FlagOpcodeResizeDB {
 			// RDB 7 版本之后引入，详见 https://github.com/antirez/redis/pull/5039/commits/5cd3c9529df93b7e726256e2de17985a57f00e7b
@@ -209,7 +242,7 @@ func (r *ParseRdb) start() error {
 				err = errors.New("Parse ResizeDB size failed: " + err.Error())
 				break
 			}
-			r.d1 = append(r.d1, Resize(dbSize, expiresSize))
+			r.Resize(dbSize, expiresSize)
 			continue
 		} else if t == FlagOpcodeExpireTimeMs {
 			_, err := io.ReadFull(r.handler, buff)
@@ -235,7 +268,7 @@ func (r *ParseRdb) start() error {
 			if err != nil {
 				break
 			}
-			r.d1 = append(r.d1, Selection(dbindex))
+			r.Selection(dbindex)
 			hasSelectDb = false
 			continue
 		} else if t == FlagOpcodeEOF {
@@ -454,111 +487,38 @@ func (r *ParseRdb) loadLZF() (res []byte, err error) {
 	return
 }
 
-func (r *ParseRdb) output() {
-	defer r.wg.Done()
-	if command.GenFileType == "json" {
-		r.writeJson()
-	} else {
-		r.writeCsv()
+func (r *ParseRdb) collect(entity protocol.TypeObject) {
+	// AllKV
+	r.writer.AdditionKV(entity)
+	// Gather && Biggest
+	if !strings.EqualFold(entity.Type(), protocol.Aux) && !strings.EqualFold(entity.Type(), protocol.SelectDB) && !strings.EqualFold(entity.Type(), protocol.ResizeDB) {
+		r.writer.KeysCount += 1
+		r.writer.KeysSize += uint64(len([]byte(entity.Key())))
+		// Gather all keys
+		if _, ok := r.writer.Gather[entity.Type()]; ok {
+			r.writer.Gather[entity.Type()][0] += 1
+			r.writer.Gather[entity.Type()][1] += entity.ValueLen()
+		}
+		// Compare biggest key
+		if len(r.writer.Biggest[entity.Type()]) == 0 {
+			r.writer.Biggest[entity.Type()] = append(r.writer.Biggest[entity.Type()], entity.Key())
+			r.writer.Biggest[entity.Type()] = append(r.writer.Biggest[entity.Type()], strconv.FormatUint(entity.ValueLen(), 10))
+			r.writer.Biggest[entity.Type()] = append(r.writer.Biggest[entity.Type()], strconv.FormatUint(entity.ConcreteSize(), 10))
+		} else if strings.Compare(r.writer.Biggest[entity.Type()][2], strconv.FormatUint(entity.ConcreteSize(), 10)) == -1 {
+			r.writer.Biggest[entity.Type()][0] = entity.Key()
+			r.writer.Biggest[entity.Type()][1] = strconv.FormatUint(entity.ValueLen(), 10)
+			r.writer.Biggest[entity.Type()][2] = strconv.FormatUint(entity.ConcreteSize(), 10)
+		}
 	}
 }
 
-func (r *ParseRdb) generateFileName(prefix, suffix string) string {
-	dir := command.Output
-	if dir == "" {
-		dir, _ = os.Getwd()
-	}
-
-	if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
-		os.Mkdir(dir, 0755)
-	}
-
-	// Check write permission.
-	if err := syscall.Access(dir, syscall.O_RDWR); err != nil {
-		panic(fmt.Sprintf("Path '%s' can not writeable! ", dir))
-	}
-
-	fileName := strings.TrimRight(dir, "/") + "/" + prefix + suffix
-	return fileName
-}
-
-func (r *ParseRdb) writeCsv() {
-	data := make([][]string, 0, len(r.d1)+1)
-	data = append(data, []string{"DataType", "Key", "Value", "Size(bytes)"})
-	for _, val := range r.d1 {
-		if entity, ok := val.(protocol.TypeObject); ok {
-			data = append(data, []string{entity.Type(), ToString(entity.Key()), ToString(entity.Value()), ToString(entity.ConcreteSize())})
-		}
-	}
-	f, err := os.OpenFile(r.generateFileName(prefix, ".csv"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		panic("Open file wrong.")
-	}
-	w := csv.NewWriter(f)
-	w.WriteAll(data)
-	w.Flush()
-}
-
-func (r *ParseRdb) writeJson() {
-	b, err := json.Marshal(r.d1)
-	if err != nil {
-		panic("Convert json wrong.")
-	}
-	f, err := os.OpenFile(r.generateFileName(prefix, ".json"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		panic("Open file wrong.")
-	}
-	w := bufio.NewWriter(f)
-	w.Write(b)
-	w.Flush()
-}
-
-func (r *ParseRdb) findBiggestKey() {
-	defer r.wg.Done()
-	var count, keySize uint64 // value's count and key's bytes
-	turns := []string{protocol.String, protocol.Hash, protocol.List, protocol.SortedSet, protocol.Set, protocol.Stream}
-	units := map[string]string{protocol.String: "bytes", protocol.Hash: "fields", protocol.List: "items", protocol.SortedSet: "members", protocol.Set: "members", protocol.Stream: "entries"}
-	gather := map[string][]uint64{protocol.String: make([]uint64, 2), protocol.Hash: make([]uint64, 2), protocol.List: make([]uint64, 2), protocol.SortedSet: make([]uint64, 2), protocol.Set: make([]uint64, 2), protocol.Stream: make([]uint64, 2)}
-	biggest := map[string][]string{protocol.String: make([]string, 0, 3), protocol.Hash: make([]string, 0, 3), protocol.List: make([]string, 0, 3), protocol.SortedSet: make([]string, 0, 3), protocol.Set: make([]string, 0, 3), protocol.Stream: make([]string, 0, 3)}
-	println("# Scanning the rdb file to find biggest keys\n")
-	for _, val := range r.d1 {
-		if entity, ok := val.(protocol.TypeObject); ok && !strings.EqualFold(entity.Type(), protocol.Aux) && !strings.EqualFold(entity.Type(), protocol.SelectDB) && !strings.EqualFold(entity.Type(), protocol.ResizeDB) {
-			count += 1
-			keySize += uint64(len([]byte(entity.Key())))
-			if _, ok := gather[entity.Type()]; ok {
-				// Gather all keys
-				gather[entity.Type()][0] += 1
-				gather[entity.Type()][1] += entity.ValueLen()
-			}
-
-			// Compare biggest key
-			if len(biggest[entity.Type()]) == 0 {
-				biggest[entity.Type()] = append(biggest[entity.Type()], entity.Key())
-				biggest[entity.Type()] = append(biggest[entity.Type()], strconv.FormatUint(entity.ValueLen(), 10))
-				biggest[entity.Type()] = append(biggest[entity.Type()], strconv.FormatUint(entity.ConcreteSize(), 10))
-			} else if strings.Compare(biggest[entity.Type()][2], strconv.FormatUint(entity.ConcreteSize(), 10)) == -1 {
-				biggest[entity.Type()][0] = entity.Key()
-				biggest[entity.Type()][1] = strconv.FormatUint(entity.ValueLen(), 10)
-				biggest[entity.Type()][2] = strconv.FormatUint(entity.ConcreteSize(), 10)
-			}
-		}
-	}
-	println("-------- summary -------\n")
-	println(fmt.Sprintf("Sampled %d keys in the keyspace!", count))
-	println(fmt.Sprintf("Total key length in bytes is %d\n", keySize))
-
-	// Biggest.
-	for _, val := range turns {
-		if len(biggest[val]) > 0 {
-			println(fmt.Sprintf("Biggest %6s found '%s' has %s %s", strings.ToLower(val), biggest[val][0], biggest[val][1], units[val]))
-		}
-	}
-	println()
-
-	// Gather
-	for _, val := range turns {
-		if len(gather[val]) > 0 {
-			println(fmt.Sprintf("%d %s with %d %s", gather[val][0], strings.ToLower(val), gather[val][1], units[val]))
-		}
-	}
+func (r *ParseRdb) flushWriter() {
+	r.wg.Add(2)
+	go func() {
+		r.writer.FlushFile()
+		r.writer.FlushGather()
+		r.wg.Done()
+		r.wg.Done()
+	}()
+	r.wg.Wait()
 }

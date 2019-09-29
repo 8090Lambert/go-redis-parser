@@ -10,8 +10,9 @@ type AuxField struct {
 	Val   interface{}
 }
 
-func AuxFields(key, val []byte) AuxField {
+func (r *ParseRdb) AuxFields(key, val []byte) AuxField {
 	aux := AuxField{Field: key, Val: val}
+	r.d2 <- aux
 	return aux
 }
 
