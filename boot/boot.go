@@ -35,9 +35,7 @@ func Boot() {
 	factory(file).Parse()
 }
 
-type Factory func(file string) protocol.Parser
-
-func NewParserFactory(mod int) Factory {
+func NewParserFactory(mod int) protocol.Factory {
 	if mod == constants.RDBMOD {
 		return rdb.NewRDB
 	} else {

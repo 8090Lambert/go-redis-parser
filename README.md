@@ -1,9 +1,9 @@
 <h1 align="left">go-redis-parser</h1>
 <img align="right" width="130px" src="https://raw.githubusercontent.com/8090Lambert/material/master/go-redis-parser.jpg">  
 
-This is a parser in Golang. Its characteristics are: make full use of 
-the coroutine language's coroutine, write at the same time as the file 
-is written, more efficient analysis.  
+A efficient and safe parser in Golang. Its characteristics are: make full use of 
+the language's `goroutine`, write at the same time as the file is written. This 
+important thing is that you can analyze without connecting to an online service.    
 <br>
    
 ```
@@ -34,17 +34,18 @@ Supports Redis from 2.8 to 5.0, all data types except module. Including:
 - List
 - Set
 - SortedSed
-- Stream
+- **Stream(Redis 5.0 new data type)**
 
 In addition to exporting all key/values, it also looks for all types of `Bigkeys` (like `redis-cli --bigkeys`).
 
 
 ### Installation
-`go-redis-parser` is a standard package，you can use `git` or `go get` to install.
+`go-redis-parser` will build a `binary file`，you can use `git` or `go get` to install.
 
 #### via git
 ```
-$ git clone https://github.com/8090Lambert/go-redis-parser.git
+$ git clone https://github.com/8090Lambert/go-redis-parser.git && cd go-redis-parser
+$ go install
 ```
 
 #### via go
@@ -53,8 +54,9 @@ $ go get github.com/8090Lambert/go-redis-parser
 ```
 
 ### Using
+Before using, you should set `export PATH=$PATH:$GOPATH/bin`
 ```
-$ go run main.go -rdb <dump.rdb> -o <gen-file folder> -type <gen-file type, json or csv, default csv>
+$ go-redis-parser -rdb <dump.rdb> -o <gen-file folder> -type <gen-file type, json or csv, default csv>
 ```
 
 ### Generate File
@@ -97,4 +99,3 @@ Biggest stream found 'stream' has 3 entries
 1 set with 2 members
 1 stream with 3 entries
 ```
-

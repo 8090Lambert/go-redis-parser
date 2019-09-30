@@ -25,3 +25,5 @@ type TypeObject interface {
 	Type() string         // Redis data type
 	ConcreteSize() uint64 // Data bytes size, except metadata
 }
+
+type Factory func(file string) Parser
